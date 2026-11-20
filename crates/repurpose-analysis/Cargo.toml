@@ -1,0 +1,31 @@
+[package]
+name = "repurpose-analysis"
+description = "Key-idea analysis: the model port and its adapters, the span checker, retries, repair and spend admission."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+url.workspace = true
+webpki-roots.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+repurpose-ingest = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

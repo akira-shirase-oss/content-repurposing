@@ -1,0 +1,12 @@
+{
+ "note": "429 with retry-after past the bound",
+ "steps": [
+  {
+   "error": {
+    "rate_limited": {
+     "retry_after_secs": 3600
+    }
+   }
+  }
+ ]
+}

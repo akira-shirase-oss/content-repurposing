@@ -1,0 +1,15 @@
+{
+ "note": "enum casing differs; accepted case-insensitively",
+ "steps": [
+  {
+   "reply": {
+    "text": "{\"ideas\": [{\"kind\": \"NUMBER\", \"text\": \"Pages fell 37 percent.\", \"quotes\": [\"In 2024 the survey found 37 percent fewer pages after adding admission control.\"]}, {\"kind\": \"Idea\", \"text\": \"Queues\", \"quotes\": [\"Bounded queues keep a service honest\"]}]}",
+    "stop": "end_turn",
+    "usage": {
+     "input_tokens": 900,
+     "output_tokens": 60
+    }
+   }
+  }
+ ]
+}

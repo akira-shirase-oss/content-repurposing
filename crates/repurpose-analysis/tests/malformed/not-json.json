@@ -1,0 +1,25 @@
+{
+ "note": "prose, then a valid answer on repair",
+ "steps": [
+  {
+   "reply": {
+    "text": "Here are the ideas: 1. queues",
+    "stop": "end_turn",
+    "usage": {
+     "input_tokens": 900,
+     "output_tokens": 20
+    }
+   }
+  },
+  {
+   "reply": {
+    "text": "{\"ideas\": [{\"kind\": \"number\", \"text\": \"Admission control cut pages by 37 percent.\", \"quotes\": [\"In 2024 the survey found 37 percent fewer pages after adding admission control.\"]}]}",
+    "stop": "end_turn",
+    "usage": {
+     "input_tokens": 900,
+     "output_tokens": 120
+    }
+   }
+  }
+ ]
+}

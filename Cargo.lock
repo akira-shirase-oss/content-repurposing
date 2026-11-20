@@ -1493,6 +1493,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "repurpose-analysis"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "proptest",
+ "repurpose-ingest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+ "tokio",
+ "tokio-rustls",
+ "url",
+ "webpki-roots",
+]
+
+[[package]]
 name = "repurpose-db"
 version = "0.1.0"
 dependencies = [

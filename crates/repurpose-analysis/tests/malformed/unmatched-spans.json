@@ -1,0 +1,15 @@
+{
+ "note": "quotes absent from the source (altered number, altered case), every call",
+ "steps": [
+  {
+   "reply": {
+    "text": "{\"ideas\": [{\"kind\": \"number\", \"text\": \"Pages fell 47 percent.\", \"quotes\": [\"the survey found 47 percent fewer pages\"]}, {\"kind\": \"idea\", \"text\": \"Paraphrase\", \"quotes\": [\"bounded queues keep a service honest\"]}]}",
+    "stop": "end_turn",
+    "usage": {
+     "input_tokens": 900,
+     "output_tokens": 60
+    }
+   }
+  }
+ ]
+}

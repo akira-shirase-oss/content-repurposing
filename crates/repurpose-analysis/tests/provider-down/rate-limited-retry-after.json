@@ -1,0 +1,22 @@
+{
+ "note": "429 with retry-after: 2, then success",
+ "steps": [
+  {
+   "error": {
+    "rate_limited": {
+     "retry_after_secs": 2
+    }
+   }
+  },
+  {
+   "reply": {
+    "text": "{\"ideas\": [{\"kind\": \"number\", \"text\": \"Admission control cut pages by 37 percent.\", \"quotes\": [\"In 2024 the survey found 37 percent fewer pages after adding admission control.\"]}]}",
+    "stop": "end_turn",
+    "usage": {
+     "input_tokens": 900,
+     "output_tokens": 120
+    }
+   }
+  }
+ ]
+}

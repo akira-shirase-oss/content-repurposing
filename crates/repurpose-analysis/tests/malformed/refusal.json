@@ -1,0 +1,15 @@
+{
+ "note": "stop_reason refusal every call",
+ "steps": [
+  {
+   "reply": {
+    "text": "",
+    "stop": "refusal",
+    "usage": {
+     "input_tokens": 900,
+     "output_tokens": 5
+    }
+   }
+  }
+ ]
+}

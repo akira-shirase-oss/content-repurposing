@@ -1,0 +1,8 @@
+{
+ "note": "HTTP 200, then an `error` event mid-stream, every call",
+ "steps": [
+  {
+   "error": "mid_stream"
+  }
+ ]
+}

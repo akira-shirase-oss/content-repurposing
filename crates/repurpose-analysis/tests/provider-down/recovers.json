@@ -1,0 +1,23 @@
+{
+ "note": "two transient failures, then success",
+ "steps": [
+  {
+   "error": "overloaded"
+  },
+  {
+   "error": {
+    "server": 500
+   }
+  },
+  {
+   "reply": {
+    "text": "{\"ideas\": [{\"kind\": \"number\", \"text\": \"Admission control cut pages by 37 percent.\", \"quotes\": [\"In 2024 the survey found 37 percent fewer pages after adding admission control.\"]}]}",
+    "stop": "end_turn",
+    "usage": {
+     "input_tokens": 900,
+     "output_tokens": 120
+    }
+   }
+  }
+ ]
+}
