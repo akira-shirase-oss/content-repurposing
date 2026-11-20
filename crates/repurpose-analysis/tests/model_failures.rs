@@ -56,7 +56,7 @@ async fn provider_down_ends_provider_unavailable_after_bounded_retries() {
             "{name}: one usage event per call"
         );
         assert!(
-            started.elapsed() < Duration::from_secs(4 * 60),
+            started.elapsed() < Duration::from_mins(4),
             "{name}: bounded in time"
         );
     }
@@ -107,7 +107,7 @@ async fn the_tenant_cap_refuses_before_any_call() {
         model.calls().is_empty(),
         "no provider call once the cap would be crossed"
     );
-    assert!(nearly_empty.events().is_empty());
+    assert_eq!(nearly_empty.events().len(), 0);
 }
 
 #[tokio::test(start_paused = true)]
@@ -168,7 +168,7 @@ async fn the_source_is_sent_as_data_and_echo_is_faithful() {
     let analysis = analyse(&model, &ledger, SOURCE, &Settings::default())
         .await
         .unwrap();
-    assert!(!analysis.ideas.is_empty());
+    assert_ne!(analysis.ideas.len(), 0);
     let sent = &model.calls()[0];
     assert_eq!(sent.source, SOURCE);
     assert!(

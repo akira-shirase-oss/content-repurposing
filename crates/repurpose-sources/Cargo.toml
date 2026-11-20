@@ -1,0 +1,38 @@
+[package]
+name = "repurpose-sources"
+description = "M1: pasted URLs as sources, the crash-safe job queue, the worker, the spend ledger and the routes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Lets the worker fetch from loopback fixture servers (tests and the load scenario only).
+test-support = ["repurpose-ingest/test-support"]
+
+[dependencies]
+axum.workspace = true
+repurpose-accounts.workspace = true
+repurpose-analysis.workspace = true
+repurpose-db.workspace = true
+repurpose-http.workspace = true
+repurpose-ingest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+repurpose-accounts = { workspace = true, features = ["test-support"] }
+repurpose-db = { workspace = true, features = ["test-support"] }
+repurpose-sources = { path = ".", features = ["test-support"] }
+tower.workspace = true
+
+[lints]
+workspace = true

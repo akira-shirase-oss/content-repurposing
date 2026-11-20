@@ -14,7 +14,9 @@ WITH expected_triggers (tbl, name, digest) AS (
     -- The events, timing, level and function of each trigger.
     VALUES ('account_events', 'account_events_append_only', 'bd4b64bf88a43d91c8f0229e240a55e1'),
            ('account_events', 'account_events_no_truncate', '91d454c7d8890d590a6e8305d980409e'),
-           ('account_events', 'account_events_stamp', '0558d12b98ccd7beaf941f03835399de')
+           ('account_events', 'account_events_stamp', '0558d12b98ccd7beaf941f03835399de'),
+           ('usage_events', 'usage_events_append_only', '2c1ba9f0bd3f158e099f1796e8b367ac'),
+           ('usage_events', 'usage_events_no_truncate', '6629500bed9cfd56927c36eec9188355')
 ), expected_functions (name, digest) AS (
     -- The whole definition, body and settings included.
     VALUES ('refuse_change', 'aa7b64a277372e0a3e2126f016e3a79d'),
@@ -25,10 +27,14 @@ WITH expected_triggers (tbl, name, digest) AS (
            ('account_events', 'INSERT,SELECT'),
            ('api_tokens', 'DELETE,INSERT,SELECT,UPDATE'),
            ('email_tokens', 'DELETE,INSERT,SELECT,UPDATE'),
+           ('ideas', 'DELETE,INSERT,SELECT,UPDATE'),
            ('invites', 'DELETE,INSERT,SELECT,UPDATE'),
            ('members', 'DELETE,INSERT,SELECT,UPDATE'),
            ('sessions', 'DELETE,INSERT,SELECT,UPDATE'),
            ('sign_in_trust', 'DELETE,INSERT,SELECT,UPDATE'),
+           ('sources', 'DELETE,INSERT,SELECT,UPDATE'),
+           ('spend_days', 'INSERT,SELECT,UPDATE'),
+           ('usage_events', 'INSERT,SELECT'),
            ('users', 'DELETE,INSERT,SELECT,UPDATE'),
            ('workspaces', 'DELETE,INSERT,SELECT,UPDATE')
 ), tables AS (

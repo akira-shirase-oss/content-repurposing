@@ -19,6 +19,20 @@ pub enum Refusal {
     Address,
 }
 
+impl Refusal {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::BadUrl => "url_invalid",
+            Self::UrlTooLong => "url_too_long",
+            Self::Scheme => "url_scheme",
+            Self::Credentials => "url_credentials",
+            Self::Port => "url_port",
+            Self::LocalName => "url_local_name",
+            Self::Address => "url_address",
+        }
+    }
+}
+
 /// A named fetch failure. Messages never carry the URL, a header or body bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum FetchError {
