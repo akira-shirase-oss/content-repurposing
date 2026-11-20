@@ -21,8 +21,11 @@ axum.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 repurpose-accounts.workspace = true
+repurpose-analysis.workspace = true
 repurpose-db.workspace = true
 repurpose-http.workspace = true
+repurpose-ingest.workspace = true
+repurpose-sources.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
@@ -31,6 +34,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 http-body-util.workspace = true
+repurpose-accounts = { workspace = true, features = ["test-support"] }
 repurpose-db = { workspace = true, features = ["test-support"] }
 tokio = { workspace = true, features = ["process"] }
 tower.workspace = true
