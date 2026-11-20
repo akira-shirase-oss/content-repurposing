@@ -179,3 +179,20 @@ async fn the_source_is_sent_as_data_and_echo_is_faithful() {
     assert_eq!(ledger.events().len(), 1);
     assert_eq!(ledger.spent(), analysis.cost);
 }
+
+#[tokio::test(start_paused = true)]
+async fn the_idea_count_is_bounded() {
+    let idea = serde_json::json!({ "kind": "idea", "text": "Queues", "quotes": ["Bounded queues keep a service honest"] });
+    let text = serde_json::json!({ "ideas": vec![idea; 40] }).to_string();
+    let model = Recorded::steps(vec![repurpose_analysis::model::Step::Reply(
+        repurpose_analysis::model::ModelReply {
+            text,
+            stop: repurpose_analysis::model::Stop::EndTurn,
+            usage: repurpose_analysis::model::Usage::default(),
+        },
+    )]);
+    let analysis = analyse(&model, &spend(), SOURCE, &Settings::default())
+        .await
+        .unwrap();
+    assert_eq!(analysis.ideas.len(), 12);
+}

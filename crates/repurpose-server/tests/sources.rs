@@ -87,10 +87,10 @@ impl Kit {
         let mut request = Request::builder().method(method).uri(path);
         match auth {
             Auth::Session(id) => {
-                request = request.header(header::COOKIE, format!("repurpose_session={id}"))
+                request = request.header(header::COOKIE, format!("repurpose_session={id}"));
             }
             Auth::Token(t) => {
-                request = request.header(header::AUTHORIZATION, format!("Bearer {t}"))
+                request = request.header(header::AUTHORIZATION, format!("Bearer {t}"));
             }
             Auth::None => {}
         }
@@ -198,7 +198,7 @@ impl Kit {
 }
 
 fn url(u: &str) -> Option<Value> {
-    Some(json!({ "url": u }))
+    (!u.is_empty()).then(|| json!({ "url": u }))
 }
 
 #[tokio::test]
@@ -395,7 +395,7 @@ async fn a_spent_workspace_refuses_new_sources_as_budget_exhausted() {
     let a = kit.workspace(&alice).await;
     sqlx::query("INSERT INTO spend_days (workspace_id, day, spent_micros) VALUES ($1, (now() AT TIME ZONE 'utc')::date, $2)")
         .bind(a)
-        .bind(Caps::default().workspace_daily)
+        .bind(1_000_000_i64)
         .execute(&kit.db.pool)
         .await
         .unwrap();
@@ -423,5 +423,34 @@ async fn a_spent_workspace_refuses_new_sources_as_budget_exhausted() {
         )
         .await;
     assert_eq!(status, StatusCode::ACCEPTED, "the cap is per workspace");
+    kit.db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_full_queue_refuses_new_sources() {
+    let kit = Kit::new().await;
+    let alice = kit.user("alice@example.test").await;
+    let a = kit.workspace(&alice).await;
+    sqlx::query(
+        "INSERT INTO sources (id, workspace_id, idempotency_key, url) \
+         SELECT gen_random_uuid(), $1, 'seed-' || n, 'https://example.com/' FROM generate_series(1, 100) n",
+    )
+    .bind(a)
+    .execute(&kit.db.pool)
+    .await
+    .unwrap();
+    let (status, body) = kit
+        .call(
+            Method::POST,
+            &format!("/v1/workspaces/{a}/sources"),
+            Auth::Session(&alice),
+            Some("k"),
+            url("https://example.com/"),
+        )
+        .await;
+    assert_eq!(
+        (status, body["error"]["code"].as_str()),
+        (StatusCode::TOO_MANY_REQUESTS, Some("queue_full"))
+    );
     kit.db.cleanup().await;
 }

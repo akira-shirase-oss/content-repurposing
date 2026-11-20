@@ -20,10 +20,8 @@ use crate::store::{self, Done, Job, MAX_ATTEMPTS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkerSettings {
-    // LIMIT(worker-concurrency)
     pub concurrency: usize,
     pub lease: Duration,
-    // LIMIT(job-deadline)
     pub job_deadline: Duration,
     pub idle_poll: Duration,
     /// When a transiently failed fetch is retried.
@@ -33,9 +31,9 @@ pub struct WorkerSettings {
 impl Default for WorkerSettings {
     fn default() -> Self {
         Self {
-            concurrency: 8,
+            concurrency: 8, // LIMIT(worker-concurrency)
             lease: Duration::from_mins(5),
-            job_deadline: Duration::from_mins(4),
+            job_deadline: Duration::from_mins(4), // LIMIT(job-deadline)
             idle_poll: Duration::from_millis(500),
             retry_after: Duration::from_secs(30),
         }
@@ -184,5 +182,20 @@ impl Worker {
         tokio::time::timeout(self.settings.job_deadline, work)
             .await
             .unwrap_or(Err(Failure::Deadline))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_job_deadline_ends_inside_the_lease() {
+        let s = WorkerSettings::default();
+        assert!(
+            s.job_deadline < s.lease,
+            "a hung job is failed before another worker may claim it"
+        );
+        assert!(s.job_deadline <= Duration::from_mins(4));
     }
 }

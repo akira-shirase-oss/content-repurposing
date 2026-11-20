@@ -291,6 +291,32 @@ mod tests {
     }
 
     #[test]
+    fn the_default_limits_hold() {
+        let many = format!(
+            "<html><body>{}</body></html>",
+            "<span>x</span>".repeat(20_001)
+        );
+        assert_eq!(
+            extract_html(&many, &url(), &Limits::default()),
+            Err(ExtractError::TooManyElements)
+        );
+        let deep = format!("<html><body>{}</body></html>", "<div>".repeat(300));
+        assert_eq!(
+            extract_html(&deep, &url(), &Limits::default()),
+            Err(ExtractError::TooDeep)
+        );
+        let long: String = (0..3_000).map(paragraph).collect();
+        let article = extract_html(
+            &format!("<html><body><article>{long}</article></body></html>"),
+            &url(),
+            &Limits::default(),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert!(article.truncated);
+        assert!(article.text.len() <= 256 * 1024);
+    }
+
+    #[test]
     fn extracts_title_and_paragraphs() {
         let body: String = (0..6).map(paragraph).collect();
         let html = format!(

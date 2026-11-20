@@ -435,3 +435,79 @@ async fn provider_failures_end_named_and_store_no_ideas() {
     );
     db.cleanup().await;
 }
+
+/// Counts calls in flight at once; each call takes a while.
+struct Gauge {
+    now: std::sync::atomic::AtomicUsize,
+    peak: std::sync::atomic::AtomicUsize,
+}
+
+impl Model for Gauge {
+    fn id(&self) -> &'static str {
+        "gauge"
+    }
+
+    fn complete<'a>(
+        &'a self,
+        request: &'a repurpose_analysis::model::ModelRequest,
+    ) -> repurpose_analysis::model::BoxFuture<
+        'a,
+        Result<ModelReply, repurpose_analysis::model::ProviderError>,
+    > {
+        use std::sync::atomic::Ordering::SeqCst;
+        Box::pin(async move {
+            let n = self.now.fetch_add(1, SeqCst) + 1;
+            self.peak.fetch_max(n, SeqCst);
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            self.now.fetch_sub(1, SeqCst);
+            Recorded::echo().complete(request).await
+        })
+    }
+}
+
+#[tokio::test]
+async fn the_worker_runs_at_most_its_concurrency_and_drains() {
+    let db = TestDb::new().await;
+    let site = pages().await;
+    let ws = workspace(&db.pool).await;
+    for n in 0..24 {
+        submit(&db.pool, ws, &format!("k{n}"), &site.url("/article")).await;
+    }
+    let gauge = Arc::new(Gauge {
+        now: 0.into(),
+        peak: 0.into(),
+    });
+    let mut w = worker(&db.pool, gauge.clone(), Caps::default());
+    w.settings.idle_poll = Duration::from_millis(20);
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let running = tokio::spawn(Arc::new(w).run(shutdown.clone()));
+    for _ in 0..600 {
+        if count(
+            &db.pool,
+            "SELECT count(*) FROM sources WHERE status = 'ready'",
+        )
+        .await
+            == 24
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    shutdown.cancel();
+    running.await.unwrap();
+    assert_eq!(
+        count(
+            &db.pool,
+            "SELECT count(*) FROM sources WHERE status = 'ready'"
+        )
+        .await,
+        24
+    );
+    let peak = gauge.peak.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        peak <= WorkerSettings::default().concurrency.min(8),
+        "peak {peak}"
+    );
+    assert!(peak > 1, "jobs ran concurrently");
+    db.cleanup().await;
+}

@@ -28,6 +28,7 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+tokio-util.workspace = true
 http-body-util.workspace = true
 repurpose-accounts = { workspace = true, features = ["test-support"] }
 repurpose-db = { workspace = true, features = ["test-support"] }

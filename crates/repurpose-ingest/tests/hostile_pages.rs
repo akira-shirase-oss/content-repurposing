@@ -178,7 +178,7 @@ async fn a_slow_loris_server_hits_the_whole_fetch_deadline() {
     })
     .await;
     assert_eq!(err, FetchError::Timeout);
-    assert!(started.elapsed() <= Limits::default().deadline + Duration::from_secs(1));
+    assert!(started.elapsed() <= Duration::from_secs(16));
     // Accepts and never answers.
     assert_eq!(fetch_err(Reply::Silent).await, FetchError::Timeout);
 }

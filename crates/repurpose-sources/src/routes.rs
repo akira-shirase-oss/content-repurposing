@@ -28,7 +28,6 @@ pub struct Sources {
     pub pool: PgPool,
     pub policy: Policy,
     pub caps: Caps,
-    // LIMIT(sources-pending)
     pub max_pending: i64,
 }
 
@@ -39,7 +38,7 @@ impl Sources {
             pool,
             policy: Policy::default(),
             caps,
-            max_pending: 100,
+            max_pending: 100, // LIMIT(sources-pending)
         }
     }
 }

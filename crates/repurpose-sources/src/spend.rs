@@ -9,7 +9,6 @@ use uuid::Uuid;
 /// Daily caps in micro-dollars.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Caps {
-    // LIMIT(spend-workspace-daily)
     pub workspace_daily: i64,
     pub global_daily: i64,
 }
@@ -19,7 +18,7 @@ impl Default for Caps {
     /// analyses (well under a cent each), tight enough that a runaway loop stops early.
     fn default() -> Self {
         Self {
-            workspace_daily: 1_000_000,
+            workspace_daily: 1_000_000, // LIMIT(spend-workspace-daily)
             global_daily: 50_000_000,
         }
     }
