@@ -26,3 +26,28 @@ Rust backend on Axum, SQLx and tokio (the template's stack); SvelteKit + TypeScr
 (strict) for the web UI once the maintainer chooses this product's design system — no
 `web/` product code before that. No on-chain code; the model provider is behind a
 recorded fixture port. Everything else follows `docs/END_GOAL.md`.
+
+## D-004 — M1 dependencies: Readability extraction, charset and gzip decoding, outbound TLS
+
+The article fetcher and extractor add: `dom_smoothie` (a Readability port) and the
+`dom_query` DOM it parses into (used directly to bound element count and nesting depth
+before Readability's recursive passes run); `encoding_rs` (the WHATWG encoding standard);
+`flate2` on its pure-Rust backend (bounded gzip); `hyper` client, `rustls` and
+`tokio-rustls` on ring with `webpki-roots` (the TLS stack the database client already
+links; no OpenSSL); `url`. `dom_query` brings four MPL-2.0 crates (`cssparser`,
+`cssparser-macros`, `selectors`, `dtoa-short`): file-level copyleft, used unmodified, so
+`deny.toml` allows MPL-2.0 for those four crates only, never as a general license. A
+change to any of them, or a vendored copy, reopens this decision.
+
+## D-005 — Key ideas cite verbatim quotes; the service computes the spans
+
+The model returns each idea with verbatim quotes from the source, never offsets. The
+service locates each quote exactly (byte-for-byte, case-sensitive, no fuzzy match) in the
+stored article text and stores half-open byte spans; a quote that is not in the source is
+refused, the answer gets one repair attempt, and an idea with no located quote is dropped
+and counted (`refused_ideas`). Every read re-checks every stored span against the stored
+text and marks a mismatch `verified: false`. Rationale: models cannot count bytes, and a
+quote the service found is a claim the service can prove. Until a live provider is chosen
+the server runs the recorded adapter (it quotes source sentences back) and says so at
+start-up; the provider client is owed before M1 can be *Done*.
+

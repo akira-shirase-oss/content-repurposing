@@ -43,7 +43,7 @@ http-body-util = "0.1.5"
 # lifetime, connection cap); axum::serve exposes none of them.
 hyper = { version = "1.12", default-features = false, features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1.21", default-features = false, features = ["tokio", "server", "service", "http1"] }
-# The outbound TLS of the article fetcher and the model client: rustls on ring with the web PKI
+# The outbound TLS of the article fetcher: rustls on ring with the web PKI
 # roots, the stack the database client already links.
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12", "logging"] }

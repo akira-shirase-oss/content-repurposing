@@ -176,19 +176,24 @@ fn main() {
             .execute(&pool)
             .await
             .unwrap();
-        sqlx::query(
-            "INSERT INTO sources (id, workspace_id, idempotency_key, url, created_at) \
-             SELECT gen_random_uuid(), $1, lpad(n::text, 9, '0'), $2 || (n % $3)::text, \
-                    now() + make_interval(secs => n / 1000000.0) \
-             FROM generate_series(0, $4 - 1) n",
-        )
-        .bind(ws)
-        .bind(&base)
-        .bind(i64::try_from(VARIANTS).unwrap())
-        .bind(i64::try_from(total).unwrap())
-        .execute(&pool)
-        .await
-        .unwrap();
+        // Seeded in batches: one statement per 50,000 rows stays inside the statement timeout.
+        let total = i64::try_from(total).unwrap();
+        for from in (0..total).step_by(50_000) {
+            sqlx::query(
+                "INSERT INTO sources (id, workspace_id, idempotency_key, url, created_at) \
+                 SELECT gen_random_uuid(), $1, lpad(n::text, 9, '0'), $2 || (n % $3)::text, \
+                        now() + make_interval(secs => n / 1000000.0) \
+                 FROM generate_series($4, least($4 + 50000, $5) - 1) n",
+            )
+            .bind(ws)
+            .bind(&base)
+            .bind(i64::try_from(VARIANTS).unwrap())
+            .bind(from)
+            .bind(total)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
     });
 
     let mut rng = seed;
