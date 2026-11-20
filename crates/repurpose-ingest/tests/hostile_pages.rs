@@ -142,7 +142,11 @@ async fn endless_redirects_stop_at_the_bound() {
         f.fetch(&server.url("/r/0")).await.map(|_| ()),
         Err(FetchError::TooManyRedirects)
     );
-    assert_eq!(server.requests().len(), f.limits().max_redirects + 1);
+    assert_eq!(
+        server.requests().len(),
+        6,
+        "the first request and five redirects"
+    );
     let looping = serve(Reply::redirect("/")).await;
     assert_eq!(
         f.fetch(&looping.url("/")).await.map(|_| ()),

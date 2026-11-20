@@ -73,6 +73,31 @@ jobs:
           eval "$(scripts/stack.sh env)"
           scripts/prove-limits.sh
 
+  # The job-queue scenario (M1: ingest -> analyse), 1,000,000 sources with seeded worker
+  # kills; the result is printed in the log, a miss fails the job (scripts/load-queue.sh).
+  load-queue:
+    name: job-queue load, 1M sources with seeded kills (scripts/load-queue.sh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Database
+        run: scripts/stack.sh up
+      - name: 1,000,000 sources
+        run: |
+          eval "$(scripts/stack.sh env)"
+          MODE=full scripts/load-queue.sh
+      - name: The result, pass or miss
+        if: always()
+        run: cat perf/results/job-queue-*.json
+
   # The production path, end to end: the operator guide's install, check, upgrade and
   # rollback blocks run as written on an Ubuntu 24.04 VM with systemd
   # (scripts/test-install.sh): hardening, env and credentials, the hardened unit,

@@ -28,12 +28,18 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+hex.workspace = true
+sha2.workspace = true
 tokio-util.workspace = true
 http-body-util.workspace = true
 repurpose-accounts = { workspace = true, features = ["test-support"] }
 repurpose-db = { workspace = true, features = ["test-support"] }
 repurpose-sources = { path = ".", features = ["test-support"] }
 tower.workspace = true
+
+[[example]]
+name = "queue-load"
+required-features = ["test-support"]
 
 [lints]
 workspace = true

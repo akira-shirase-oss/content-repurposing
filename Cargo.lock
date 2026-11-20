@@ -1595,6 +1595,7 @@ name = "repurpose-sources"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "hex",
  "http-body-util",
  "repurpose-accounts",
  "repurpose-analysis",
@@ -1604,6 +1605,7 @@ dependencies = [
  "repurpose-sources",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "sqlx",
  "thiserror",
  "tokio",
