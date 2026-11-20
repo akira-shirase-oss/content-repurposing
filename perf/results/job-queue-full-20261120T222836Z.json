@@ -1,0 +1,19 @@
+{
+  "scenario": "job-queue",
+  "mode": "full",
+  "started_utc": "20261120T222836Z",
+  "commit": "56afe631b0e409ab13899a7a93a1c87a7ed2b317",
+  "tree_dirty": false,
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor",
+    "cores": 8,
+    "memory_gb": 31.3,
+    "os": "Ubuntu 22.04.5 LTS",
+    "load_average_before": "1.76, 1.02, 0.89",
+    "load_average_after": "2.10, 2.03, 2.00"
+  },
+  "result": {
+    "pass": false,
+    "error": "the harness printed nothing"
+  }
+}

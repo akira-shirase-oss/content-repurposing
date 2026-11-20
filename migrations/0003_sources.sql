@@ -27,7 +27,9 @@ CREATE TABLE sources (
     CHECK (status <> 'ready' OR body IS NOT NULL)
 );
 CREATE INDEX sources_workspace_created ON sources (workspace_id, created_at DESC, id DESC);
-CREATE INDEX sources_claimable ON sources (created_at) WHERE status IN ('pending', 'running');
+CREATE INDEX sources_claimable ON sources (created_at, id) WHERE status IN ('pending', 'running');
+-- The lease sweep reads only running rows: without this it walks every pending row per claim.
+CREATE INDEX sources_leased ON sources (lease_until) WHERE status = 'running';
 
 -- A key idea and the spans it quotes: `spans` is `[{"start","end","text"}]`, byte offsets
 -- into `sources.body`, re-checked against the body on every read.

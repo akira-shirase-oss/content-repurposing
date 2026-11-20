@@ -245,7 +245,7 @@ fn main() {
         rt.spawn(worker.run(token.clone()));
         let next_kill = kill_points.get(usize::try_from(killed).unwrap()).copied();
         let done = loop {
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_secs(1));
             let finished = u64::try_from(ready(&main_rt)).unwrap();
             if finished >= total || started.elapsed() > deadline {
                 break true;
