@@ -1,0 +1,50 @@
+{
+  "scenario": "job-queue",
+  "mode": "full",
+  "started_utc": "20261121T121108Z",
+  "commit": "8866adeb59f2bb7b845c01e31e9cbb529a49c7eb",
+  "tree_dirty": false,
+  "machine": {
+    "cpu": "AMD EPYC 9V74 80-Core Processor",
+    "cores": 4,
+    "memory_gb": 15.6,
+    "os": "Ubuntu 26.04.1 LTS",
+    "load_average_before": "2.55, 0.81, 0.32",
+    "load_average_after": "4.51, 5.77, 5.56"
+  },
+  "result": {
+    "concurrency": 32,
+    "digest": "275606a101394f3f9eaccac0303bdc18c08802b2f19a8d57f8367c0dec86a24c",
+    "events_without_call": 1,
+    "expected_ideas": 5000000,
+    "failed": 0,
+    "generations": 11,
+    "ideas": 5000000,
+    "jobs_per_second": 352.76827747023407,
+    "kills": 10,
+    "lost": 0,
+    "pass": true,
+    "provider_calls": 1000038,
+    "ready": 1000000,
+    "reference_digest": "275606a101394f3f9eaccac0303bdc18c08802b2f19a8d57f8367c0dec86a24c",
+    "rss_growth_kib": 51616,
+    "rss_peak_kib": 69660,
+    "scenario": "job-queue (M1: ingest -> analyse)",
+    "seconds": 2834.722008371,
+    "seed": 20261120,
+    "thresholds": {
+      "digest": "== reference_digest",
+      "events_without_call": "0 ..= kills x concurrency",
+      "failed": "== 0",
+      "ideas": "== expected_ideas",
+      "lost": "== 0",
+      "rss_growth_kib": "<= 65536",
+      "rss_peak_kib": "<= 524288",
+      "unrecorded_calls": "== 0"
+    },
+    "total": 1000000,
+    "unrecorded_calls": 0,
+    "unsettled": 25,
+    "usage_events": 1000039
+  }
+}
