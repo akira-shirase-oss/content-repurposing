@@ -46,6 +46,7 @@ pub fn gunzip_counted(wire: &[u8], max: usize) -> (Result<Vec<u8>, FetchError>, 
         read: 0,
     };
     let limit = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1);
+    // LIMIT(gzip-take)
     let read = (&mut decoder).take(limit).read_to_end(&mut out);
     let inflated = decoder.read;
     if read.is_err() {

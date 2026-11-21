@@ -90,6 +90,7 @@ pub async fn ingest(
 }
 
 /// Blocking extractions running at once, process-wide, whatever the number of workers.
+// LIMIT(extract-threads)
 pub const EXTRACT_THREADS: usize = 4;
 
 fn extract_pool() -> &'static Arc<Semaphore> {

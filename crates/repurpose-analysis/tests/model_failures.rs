@@ -35,6 +35,9 @@ async fn run(
     (out, model, ledger)
 }
 
+/// The attempt bound written in `END_GOAL` failure case 1, independent of `Settings`.
+const ATTEMPTS: usize = 3;
+
 #[tokio::test(start_paused = true)]
 async fn provider_down_ends_provider_unavailable_after_bounded_retries() {
     for name in [
@@ -46,10 +49,13 @@ async fn provider_down_ends_provider_unavailable_after_bounded_retries() {
         let (out, model, ledger) = run(name).await;
         assert_eq!(out, Err(AnalysisError::ProviderUnavailable), "{name}");
         let calls = model.calls().len();
-        assert!(
-            calls <= Settings::default().max_attempts as usize,
-            "{name}: {calls} calls"
-        );
+        assert!((1..=ATTEMPTS).contains(&calls), "{name}: {calls} calls");
+        if name.ends_with("hang") {
+            assert!(
+                calls >= 2,
+                "{name}: a hung call is cut at the call timeout and retried"
+            );
+        }
         assert_eq!(
             ledger.events().len(),
             calls,

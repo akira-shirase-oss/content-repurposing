@@ -90,6 +90,7 @@ pub fn extract_html_until(
 }
 
 /// Input fed to the parser at a time; the bounds are checked between chunks.
+// LIMIT(extract-parse-chunk)
 const CHUNK: usize = 4 * 1024;
 
 /// What a parse cost: input bytes fed to the parser and tree-building operations.

@@ -49,6 +49,8 @@ mutations=(
   "plan|crates/repurpose-accounts/src/domain.rs|current < i64::from\(limit\)=>true|repurpose-accounts|limits|token_and_workspace_limits_hold_under_concurrency"
   "ready-deadline|crates/repurpose-server/src/health.rs|self\.deadline=>Duration::from_secs(3600)|repurpose-server|health|readyz_reports_a_silent_database_within_its_deadline"
   "extract-elements|crates/repurpose-ingest/src/extract.rs|20_000=>usize::MAX|repurpose-ingest|lib|extract::tests::the_default_limits_hold"
+  "extract-threads|crates/repurpose-ingest/src/lib.rs|EXTRACT_THREADS: usize = 4;=>EXTRACT_THREADS: usize = 4096;|repurpose-ingest|extract_pool|the_process_pool_is_smaller_than_the_job_concurrency"
+  "extract-parse-chunk|crates/repurpose-ingest/src/extract.rs|CHUNK: usize = 4 \* 1024;=>CHUNK: usize = usize::MAX;|repurpose-ingest|hostile_pages|nesting_hidden_behind_svg_raw_text_or_a_bang_comment_is_refused_in_bounded_work"
   "extract-depth|crates/repurpose-ingest/src/extract.rs|256=>4096|repurpose-ingest|lib|extract::tests::the_default_limits_hold"
   "extract-text-bytes|crates/repurpose-ingest/src/extract.rs|256 \* 1024=>usize::MAX|repurpose-ingest|lib|extract::tests::the_default_limits_hold"
   "fetch-redirects|crates/repurpose-ingest/src/fetch.rs|max_redirects: 5=>max_redirects: 1000|repurpose-ingest|hostile_pages|endless_redirects_stop_at_the_bound"

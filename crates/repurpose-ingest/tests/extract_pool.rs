@@ -72,3 +72,11 @@ fn a_cancelled_parse_stops_between_chunks() {
     );
     assert_eq!(out.unwrap_err(), ExtractError::Cancelled);
 }
+
+/// The process-wide pool bounds extraction CPU below the worker's job concurrency (8),
+/// so jobs past their deadline cannot multiply the blocking threads.
+#[test]
+fn the_process_pool_is_smaller_than_the_job_concurrency() {
+    const JOB_CONCURRENCY: usize = 8;
+    assert!((1..JOB_CONCURRENCY).contains(&repurpose_ingest::EXTRACT_THREADS));
+}
