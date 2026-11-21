@@ -11,13 +11,19 @@ use std::sync::Arc;
 
 use repurpose_accounts::Accounts;
 use repurpose_accounts::mail::{Disabled, MailTransport, SmtpRelay};
+use repurpose_analysis::model::Recorded;
 use repurpose_db::guard::{Refusal, check_at_startup};
 use repurpose_db::schema;
 use repurpose_http::stack::ErrorWindow;
 use repurpose_http::{Drained, serve};
+use repurpose_ingest::fetch::{Fetcher, Limits as FetchLimits};
+use repurpose_ingest::guard::Policy;
+use repurpose_ingest::resolve::Resolver;
 use repurpose_server::config::{Config, LogFormat, Process};
 use repurpose_server::health::Health;
 use repurpose_server::{AppState, app};
+use repurpose_sources::spend::Caps;
+use repurpose_sources::{Sources, Worker, WorkerSettings};
 use tokio::net::TcpListener;
 
 fn main() -> ExitCode {
@@ -124,19 +130,59 @@ async fn run(config: Config) -> Result<Drained, Stop> {
         config.error_rate_permille,
         config.error_min_requests,
     );
+    let caps = Caps::default();
+    let sources = Sources::new(accounts.clone(), pool.clone(), caps);
+    // No live provider adapter exists yet: the recorded adapter answers with the
+    // source's own sentences, so the pipeline runs end to end without a key.
+    tracing::warn!("model: the recorded adapter (no live provider is configured)");
+    let worker = Arc::new(Worker {
+        pool: pool.clone(),
+        fetcher: Fetcher::new(
+            Policy::default(),
+            FetchLimits::default(),
+            Resolver::default(),
+        )?,
+        model: Arc::new(Recorded::echo()),
+        analysis: repurpose_analysis::Settings::default(),
+        extract: repurpose_ingest::extract::Limits::default(),
+        caps,
+        settings: WorkerSettings::default(),
+    });
+    let worker = tokio::spawn(worker.run(shutdown.clone()));
     let router = app(AppState {
         accounts,
         health,
         errors,
         stack: config.stack,
         max_in_flight: config.max_in_flight,
+        sources,
     });
     let listener = TcpListener::bind(config.listen).await?;
     tracing::info!(listen = %listener.local_addr()?, version = env!("CARGO_PKG_VERSION"), "listening");
     let drained = serve(listener, router, config.connection, shutdown).await;
+    let worker_ok = match worker.await {
+        Ok(drained) if drained.clean() => true,
+        Ok(drained) => {
+            tracing::error!(
+                panicked = drained.panicked,
+                abandoned = drained.abandoned,
+                "job tasks ended abnormally"
+            );
+            false
+        }
+        Err(_) => {
+            tracing::error!(code = "worker_panicked", "the worker loop panicked");
+            false
+        }
+    };
     if let Ok(name) = signal.await {
         tracing::info!(signal = name, "drained after signal");
     }
     let _ = tokio::time::timeout(std::time::Duration::from_secs(2), pool.close()).await;
+    if !worker_ok {
+        return Err(Stop::Failed(anyhow::anyhow!(
+            "the worker did not drain cleanly"
+        )));
+    }
     Ok(drained)
 }

@@ -1,0 +1,43 @@
+{
+  "scenario": "job-queue",
+  "mode": "full",
+  "started_utc": "20261120T233207Z",
+  "commit": "b2199022a1b79525b29c06b687bb17a508b8d965",
+  "tree_dirty": false,
+  "machine": {
+    "cpu": "Intel(R) Xeon(R) Processor",
+    "cores": 8,
+    "memory_gb": 31.3,
+    "os": "Ubuntu 22.04.5 LTS",
+    "load_average_before": "0.38, 1.75, 1.97",
+    "load_average_after": "3.74, 4.43, 4.15"
+  },
+  "result": {
+    "concurrency": 32,
+    "digest": "52b10b2435ca750a987ba81a6f97f04189268da7ae55b9faf95288ad55d27e56",
+    "expected_ideas": 5000000,
+    "failed": 0,
+    "generations": 11,
+    "ideas": 5000000,
+    "jobs_per_second": 604.5160541191442,
+    "kills": 10,
+    "lost": 0,
+    "pass": true,
+    "provider_calls": 1000046,
+    "ready": 1000000,
+    "reference_digest": "52b10b2435ca750a987ba81a6f97f04189268da7ae55b9faf95288ad55d27e56",
+    "scenario": "job-queue (M1: ingest -> analyse)",
+    "seconds": 1654.215786638,
+    "seed": 20261120,
+    "thresholds": {
+      "digest": "== reference_digest",
+      "failed": "== 0",
+      "ideas": "== expected_ideas",
+      "lost": "== 0",
+      "unsettled_calls": "0 ..= kills x concurrency"
+    },
+    "total": 1000000,
+    "unsettled_calls": 40,
+    "usage_events": 1000006
+  }
+}

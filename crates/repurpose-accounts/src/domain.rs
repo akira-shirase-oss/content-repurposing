@@ -80,6 +80,8 @@ impl Role {
 pub enum Action {
     /// See the workspace.
     Read,
+    /// Add or change the workspace's content (sources, drafts): every role.
+    Edit,
     /// List its members.
     ListMembers,
     /// Add or remove an admin or a member.
@@ -95,7 +97,7 @@ pub enum Action {
 /// The policy table: which role may do what.
 pub const fn allows(role: Role, action: Action) -> bool {
     match action {
-        Action::Read | Action::ListMembers => true,
+        Action::Read | Action::ListMembers | Action::Edit => true,
         Action::ManageMembers | Action::ManageTokens => matches!(role, Role::Owner | Role::Admin),
         Action::ManageOwners | Action::Delete => matches!(role, Role::Owner),
     }

@@ -17,6 +17,7 @@ use repurpose_db::PoolSettings;
 use repurpose_http::stack::{ErrorWindow, StackLimits};
 use repurpose_server::health::Health;
 use repurpose_server::{AppState, app};
+use repurpose_sources::spend::Caps;
 use tower::ServiceExt as _;
 
 async fn app_on(database_url: &str, ready: Duration) -> (axum::Router, Arc<ErrorWindow>) {
@@ -29,12 +30,14 @@ async fn app_on(database_url: &str, ready: Duration) -> (axum::Router, Arc<Error
     let accounts = Accounts::new(pool.clone(), Settings::default(), Arc::new(Disabled))
         .await
         .unwrap();
+    let sources = repurpose_sources::Sources::new(accounts.clone(), pool.clone(), Caps::default());
     let router = app(AppState {
         accounts,
         health: Health::new(pool, ready, errors.clone(), 50, 20),
         errors: errors.clone(),
         stack: StackLimits::default(),
         max_in_flight: 64,
+        sources,
     });
     (router, errors)
 }

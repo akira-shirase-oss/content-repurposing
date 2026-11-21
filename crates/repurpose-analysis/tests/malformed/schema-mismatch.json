@@ -1,0 +1,15 @@
+{
+ "note": "valid JSON, wrong shape, every call",
+ "steps": [
+  {
+   "reply": {
+    "text": "{\"points\":[\"not the schema\"]}",
+    "stop": "end_turn",
+    "usage": {
+     "input_tokens": 900,
+     "output_tokens": 20
+    }
+   }
+  }
+ ]
+}

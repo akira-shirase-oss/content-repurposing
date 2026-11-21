@@ -1,0 +1,15 @@
+{
+ "note": "truncated by max_tokens every call",
+ "steps": [
+  {
+   "reply": {
+    "text": "{\"ideas\":[{\"kind\":\"idea\",\"te",
+    "stop": "max_tokens",
+    "usage": {
+     "input_tokens": 900,
+     "output_tokens": 2000
+    }
+   }
+  }
+ ]
+}

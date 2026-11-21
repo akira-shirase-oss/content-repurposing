@@ -1,0 +1,37 @@
+[package]
+name = "repurpose-ingest"
+description = "Untrusted-URL ingest: the SSRF-guarded, bounded article fetcher and the Readability extractor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Lets a test fetch from a loopback fixture server. Never enabled by a production crate.
+test-support = []
+
+[dependencies]
+dom_query.workspace = true
+dom_smoothie.workspace = true
+encoding_rs.workspace = true
+flate2.workspace = true
+html5ever.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+rustls.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+url.workspace = true
+webpki-roots.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true
+proptest.workspace = true
+repurpose-ingest = { path = ".", features = ["test-support"] }
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

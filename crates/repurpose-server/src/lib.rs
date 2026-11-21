@@ -32,6 +32,8 @@ pub struct AppState {
     pub stack: StackLimits,
     /// Requests at once on `/v1` before shedding.
     pub max_in_flight: usize,
+    /// M1: pasted URLs, their jobs and ideas.
+    pub sources: repurpose_sources::Sources,
 }
 
 /// A sample product route: readable with a workspace's API token or by its members.
@@ -54,6 +56,7 @@ pub fn app(state: AppState) -> Router {
         .with_state(state.accounts.clone());
     let v1 = repurpose_accounts::router(state.accounts.clone())
         .merge(product)
+        .merge(repurpose_sources::router(state.sources.clone()))
         .route_layer(axum::middleware::from_fn_with_state(
             stack::gate(state.max_in_flight),
             stack::shed,

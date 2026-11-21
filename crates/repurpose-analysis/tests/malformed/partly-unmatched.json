@@ -1,0 +1,15 @@
+{
+ "note": "one matching idea, one invented",
+ "steps": [
+  {
+   "reply": {
+    "text": "{\"ideas\": [{\"kind\": \"number\", \"text\": \"Pages fell 37 percent.\", \"quotes\": [\"In 2024 the survey found 37 percent fewer pages after adding admission control.\"]}, {\"kind\": \"number\", \"text\": \"Invented\", \"quotes\": [\"costs fell 90 percent overnight\"]}]}",
+    "stop": "end_turn",
+    "usage": {
+     "input_tokens": 900,
+     "output_tokens": 60
+    }
+   }
+  }
+ ]
+}

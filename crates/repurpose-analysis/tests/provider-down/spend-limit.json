@@ -1,0 +1,8 @@
+{
+ "note": "429 enforced_spend_limit_reached, no retry-after",
+ "steps": [
+  {
+   "error": "spend_limit"
+  }
+ ]
+}
