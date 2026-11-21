@@ -33,6 +33,7 @@ dom_smoothie = "0.19.0"
 # The DOM dom_smoothie parses into; used directly to bound element count and depth before
 # its recursive passes run (same version dom_smoothie pins).
 dom_query = { version = "0.29.0", default-features = false }
+html5ever = { version = "0.40.1", default-features = false }
 # Charset decoding of fetched pages (the WHATWG encoding standard's labels and decoders).
 encoding_rs = "0.8.44"
 # Bounded gzip decoding of fetched pages; pure Rust (miniz_oxide).

@@ -58,6 +58,9 @@ pub fn check_url(raw: &str, policy: Policy) -> Result<Url, Refusal> {
         return Err(Refusal::UrlTooLong);
     }
     let url = Url::parse(raw.trim()).map_err(|_| Refusal::BadUrl)?;
+    if url.as_str().len() > MAX_URL_BYTES {
+        return Err(Refusal::UrlTooLong);
+    }
     check_parsed(&url, policy)?;
     Ok(url)
 }
@@ -252,6 +255,12 @@ mod tests {
             check_url(&format!("https://example.com/{}", "a".repeat(3000)), p).map(|_| ()),
             Err(Refusal::UrlTooLong)
         );
+        // Short as typed, too long once percent-encoded: the stored form is what counts.
+        let encoded = format!("https://example.com/{}", "é".repeat(800));
+        assert!(encoded.len() <= MAX_URL_BYTES);
+        assert_eq!(check_url(&encoded, p).map(|_| ()), Err(Refusal::UrlTooLong));
+        let fits = format!("https://example.com/{}", "é".repeat(300));
+        assert!(check_url(&fits, p).is_ok_and(|u| u.as_str().len() <= MAX_URL_BYTES));
         assert!(check_url("https://example.com/a?b=c", p).is_ok());
         assert!(check_url("http://example.com/", p).is_ok());
         let strict = Policy {

@@ -271,3 +271,41 @@ async fn charset_tricks_decode_by_the_standard() {
         "BOM beats header and meta"
     );
 }
+
+/// Work thresholds for a refused page, fixed before the first run: refusal within two
+/// parser input chunks, whatever the page's length.
+const MAX_BYTES_FED: usize = 8 * 1024;
+const MAX_SINK_OPS: u64 = 4_096;
+
+#[test]
+fn nesting_hidden_behind_svg_raw_text_or_a_bang_comment_is_refused_in_bounded_work() {
+    for name in [
+        "svg-title-nest.html",
+        "svg-style-nest.html",
+        "comment-bang-nest.html",
+    ] {
+        let html = String::from_utf8(fixture(name)).unwrap();
+        let (out, work) = extract::parse_work(&html, &extract::Limits::default());
+        assert_eq!(out, Err(ExtractError::TooDeep), "{name}");
+        assert!(work.bytes_fed <= MAX_BYTES_FED, "{name}: {work:?}");
+        assert!(work.sink_ops <= MAX_SINK_OPS, "{name}: {work:?}");
+        // Eight times the nesting costs the same work: refusal does not wait for the end.
+        let bigger = html.replace(&"<div>".repeat(5_000), &"<div>".repeat(40_000));
+        assert!(bigger.len() > 7 * html.len());
+        let (out, more) = extract::parse_work(&bigger, &extract::Limits::default());
+        assert_eq!(out, Err(ExtractError::TooDeep), "{name}");
+        assert_eq!(more, work, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn nesting_behind_svg_raw_text_or_a_bang_comment_ends_named() {
+    for name in [
+        "svg-title-nest.html",
+        "svg-style-nest.html",
+        "comment-bang-nest.html",
+    ] {
+        let err = ingest_page("text/html", fixture(name)).await.unwrap_err();
+        assert_eq!(err, IngestError::Extract(ExtractError::TooDeep), "{name}");
+    }
+}

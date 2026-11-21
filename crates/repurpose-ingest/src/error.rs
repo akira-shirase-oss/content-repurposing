@@ -109,6 +109,8 @@ pub enum ExtractError {
     TooDeep,
     #[error("the page has no readable article")]
     NoArticle,
+    #[error("the extraction was abandoned at its deadline")]
+    Cancelled,
 }
 
 impl ExtractError {
@@ -117,6 +119,7 @@ impl ExtractError {
             Self::TooManyElements => "extract_too_many_elements",
             Self::TooDeep => "extract_too_deep",
             Self::NoArticle => "extract_no_article",
+            Self::Cancelled => "extract_cancelled",
         }
     }
 }

@@ -1554,6 +1554,7 @@ dependencies = [
  "dom_smoothie",
  "encoding_rs",
  "flate2",
+ "html5ever",
  "http-body-util",
  "hyper",
  "hyper-util",
