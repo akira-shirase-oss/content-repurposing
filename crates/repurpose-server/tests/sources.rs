@@ -251,6 +251,21 @@ async fn submit_is_idempotent_and_refuses_unfetchable_urls_by_name() {
             "{raw}"
         );
     }
+    // Within the cap as typed, over it once percent-encoded: refused by name, not a 500.
+    let encoded = format!("https://example.com/{}", "é".repeat(800));
+    let (status, body) = kit
+        .call(
+            Method::POST,
+            &path,
+            Auth::Session(&alice),
+            Some("encoded"),
+            url(&encoded),
+        )
+        .await;
+    assert_eq!(
+        (status, body["error"]["code"].as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, Some("url_too_long"))
+    );
     let (status, body) = kit
         .call(
             Method::POST,
