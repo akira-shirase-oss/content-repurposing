@@ -5,8 +5,10 @@
 //!
 //! Thresholds, fixed before the first run: zero lost sources, zero failed sources,
 //! zero duplicate ideas, a digest of every stored idea equal to the digest computed from
-//! a kill-free reference, and every provider call either settled as a usage event or
-//! interrupted by a kill (unsettled calls ≤ kills × concurrency).
+//! a kill-free reference; every provider call recorded as a usage event before it starts
+//! (zero unrecorded calls; events for calls a kill cut before they started ≤ kills ×
+//! concurrency); peak RSS ≤ 512 MiB, and RSS growth from the first tenth of the run to the
+//! end ≤ 64 MiB (memory does not scale with the jobs done).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -63,7 +65,7 @@ fn page(k: u64) -> String {
     )
 }
 
-/// The recorded model, counting calls without keeping a million requests.
+/// The recorded echo (which keeps no request), counted, and taking a moment per call.
 struct Counting {
     calls: AtomicU64,
     echo: Recorded,
@@ -86,6 +88,23 @@ impl Model for Counting {
         })
     }
 }
+
+/// This process's resident set and its peak, in KiB, from `/proc/self/status`.
+fn rss_kib() -> (u64, u64) {
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let field = |name: &str| {
+        status
+            .lines()
+            .find_map(|l| l.strip_prefix(name))
+            .and_then(|v| v.split_whitespace().next())
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    };
+    (field("VmRSS:"), field("VmHWM:"))
+}
+
+const MAX_PEAK_RSS_KIB: u64 = 512 * 1024;
+const MAX_RSS_GROWTH_KIB: u64 = 64 * 1024;
 
 fn env(name: &str, default: u64) -> u64 {
     std::env::var(name)
@@ -212,6 +231,7 @@ fn main() {
     let mut generations = 0u64;
     let mut killed = 0u64;
     let deadline = Duration::from_secs(env("MAX_SECONDS", 4 * 3600));
+    let mut rss_at_tenth: Option<u64> = None;
     loop {
         generations += 1;
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -247,6 +267,9 @@ fn main() {
         let done = loop {
             std::thread::sleep(Duration::from_secs(1));
             let finished = u64::try_from(ready(&main_rt)).unwrap();
+            if rss_at_tenth.is_none() && finished >= total / 10 {
+                rss_at_tenth = Some(rss_kib().0);
+            }
             if finished >= total || started.elapsed() > deadline {
                 break true;
             }
@@ -262,6 +285,8 @@ fn main() {
         killed += 1;
     }
     let seconds = started.elapsed().as_secs_f64();
+    let (rss_end, rss_peak) = rss_kib();
+    let rss_growth = rss_end.saturating_sub(rss_at_tenth.unwrap_or(rss_end));
 
     let pool_ref = &pool;
     let count = |sql: &'static str| -> i64 {
@@ -272,6 +297,7 @@ fn main() {
     let ready_n = count("SELECT count(*) FROM sources WHERE status = 'ready'");
     let failed = count("SELECT count(*) FROM sources WHERE status = 'failed'");
     let usage = count("SELECT count(*) FROM usage_events");
+    let settled_gap = usage - count("SELECT count(*) FROM usage_settlements");
     let ideas = count("SELECT count(*) FROM ideas");
     let index = |n: u64| usize::try_from(n % VARIANTS).unwrap();
     let expected_ideas: i64 = (0..total)
@@ -354,14 +380,16 @@ fn main() {
     let calls = model.calls.load(SeqCst);
     let stored = hex::encode(stored.finalize());
     let expected = hex::encode(expected.finalize());
-    let unsettled = i64::try_from(calls).unwrap() - usage;
+    let unrecorded = i64::try_from(calls).unwrap() - usage;
     let total_i = i64::try_from(total).unwrap();
     let pass = ready_n == total_i
         && failed == 0
         && ideas == expected_ideas
         && stored == expected
-        && unsettled >= 0
-        && unsettled <= i64::try_from(killed).unwrap() * i64::try_from(CONCURRENCY).unwrap();
+        && unrecorded <= 0
+        && -unrecorded <= i64::try_from(killed).unwrap() * i64::try_from(CONCURRENCY).unwrap()
+        && rss_peak <= MAX_PEAK_RSS_KIB
+        && rss_growth <= MAX_RSS_GROWTH_KIB;
     println!(
         "{}",
         serde_json::json!({
@@ -370,11 +398,15 @@ fn main() {
             "concurrency": CONCURRENCY, "seconds": seconds, "jobs_per_second": (total as f64) / seconds,
             "ready": ready_n, "failed": failed, "lost": total_i - ready_n - failed,
             "ideas": ideas, "expected_ideas": expected_ideas,
-            "provider_calls": calls, "usage_events": usage, "unsettled_calls": unsettled,
+            "provider_calls": calls, "usage_events": usage, "unsettled": settled_gap,
+            "unrecorded_calls": unrecorded.max(0), "events_without_call": (-unrecorded).max(0),
+            "rss_peak_kib": rss_peak, "rss_growth_kib": rss_growth,
             "digest": stored, "reference_digest": expected,
             "thresholds": {
                 "lost": "== 0", "failed": "== 0", "ideas": "== expected_ideas",
-                "digest": "== reference_digest", "unsettled_calls": "0 ..= kills x concurrency"
+                "digest": "== reference_digest", "unrecorded_calls": "== 0",
+                "events_without_call": "0 ..= kills x concurrency",
+                "rss_peak_kib": "<= 524288", "rss_growth_kib": "<= 65536"
             },
             "pass": pass,
         })

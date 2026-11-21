@@ -75,4 +75,21 @@ ALTER TABLE usage_events ENABLE ALWAYS TRIGGER usage_events_no_truncate;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON sources, ideas TO repurpose_app;
 GRANT SELECT, INSERT, UPDATE ON spend_days TO repurpose_app;
-GRANT SELECT, INSERT ON usage_events TO repurpose_app;
+-- The settled usage of an admitted call; an event without one was killed mid-call and
+-- stands at its estimate.
+CREATE TABLE usage_settlements (
+    event_id uuid PRIMARY KEY REFERENCES usage_events (id),
+    at timestamptz NOT NULL DEFAULT now(),
+    input_tokens bigint NOT NULL CHECK (input_tokens >= 0),
+    output_tokens bigint NOT NULL CHECK (output_tokens >= 0),
+    cost_micros bigint NOT NULL CHECK (cost_micros >= 0)
+);
+
+CREATE TRIGGER usage_settlements_append_only BEFORE UPDATE OR DELETE ON usage_settlements
+    FOR EACH ROW EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER usage_settlements_no_truncate BEFORE TRUNCATE ON usage_settlements
+    FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();
+ALTER TABLE usage_settlements ENABLE ALWAYS TRIGGER usage_settlements_append_only;
+ALTER TABLE usage_settlements ENABLE ALWAYS TRIGGER usage_settlements_no_truncate;
+
+GRANT SELECT, INSERT ON usage_events, usage_settlements TO repurpose_app;

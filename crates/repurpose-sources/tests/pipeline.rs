@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use repurpose_analysis::model::{Model, ModelReply, Recorded, Step, Stop, Usage};
-use repurpose_analysis::spend::{Spend, SpendError};
+use repurpose_analysis::spend::{Estimate, Spend, SpendError};
 use repurpose_db::testing::TestDb;
 use repurpose_ingest::extract;
 use repurpose_ingest::fetch::{Fetcher, Limits};
@@ -21,6 +21,16 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 const ARTICLE: &str = include_str!("../../repurpose-ingest/tests/hostile-pages/article.html");
+
+fn est(cost: u64) -> Estimate {
+    Estimate {
+        usage: Usage {
+            input_tokens: 100,
+            output_tokens: 100,
+        },
+        cost,
+    }
+}
 
 async fn workspace(pool: &PgPool) -> Uuid {
     let id = Uuid::now_v7();
@@ -100,7 +110,7 @@ async fn a_pasted_url_becomes_ideas_with_exact_spans() {
             assert_eq!(&body[span.start..span.end], span.text);
         }
     }
-    assert_eq!(model.calls().len(), 1);
+    assert_eq!(model.call_count(), 1);
     assert_eq!(
         count(&db.pool, "SELECT count(*) FROM usage_events").await,
         1
@@ -253,7 +263,7 @@ async fn the_workspace_spend_cap_refuses_before_the_model_is_called() {
     let w = worker(&db.pool, Arc::new(model.clone()), caps);
     let (_, outcome) = w.run_once().await.unwrap().unwrap();
     assert_eq!(outcome, Outcome::Failed("budget_exhausted"));
-    assert_eq!(model.calls().len(), 0, "no provider call");
+    assert_eq!(model.call_count(), 0, "no provider call");
     assert_eq!(
         count(&db.pool, "SELECT count(*) FROM usage_events").await,
         0
@@ -278,7 +288,7 @@ async fn admissions_never_exceed_the_cap_under_concurrency() {
                 workspace: ws,
                 source: None,
             };
-            tokio::spawn(async move { spend.admit(100_000).await })
+            tokio::spawn(async move { spend.admit("recorded", est(100_000)).await })
         })
         .collect();
     let mut admitted = Vec::new();
@@ -304,7 +314,6 @@ async fn admissions_never_exceed_the_cap_under_concurrency() {
         spend
             .settle(
                 a,
-                "recorded",
                 Usage {
                     input_tokens: 10,
                     output_tokens: 10,
@@ -345,9 +354,9 @@ async fn usage_events_are_append_only() {
         workspace: ws,
         source: None,
     };
-    let a = spend.admit(10).await.unwrap();
+    let a = spend.admit("recorded", est(10)).await.unwrap();
     spend
-        .settle(a, "recorded", Usage::default(), 0)
+        .settle(a, Usage::default(), 0)
         .await
         .unwrap();
     assert!(
@@ -387,7 +396,7 @@ async fn ssrf_redirects_and_transient_fetches_are_named() {
         None,
         "a released job waits out its retry delay"
     );
-    assert_eq!(model.calls().len(), 0);
+    assert_eq!(model.call_count(), 0);
     db.cleanup().await;
 }
 
@@ -433,6 +442,18 @@ async fn provider_failures_end_named_and_store_no_ideas() {
         w.run_once().await.unwrap(),
         Some((id, Outcome::Failed("job_deadline")))
     );
+    // The cut call was recorded before it started and stays billed at its estimate.
+    let (events, settled, billed): (i64, i64, i64) = sqlx::query_as(
+        "SELECT count(e.id), count(s.event_id), coalesce(sum(e.cost_micros), 0)::bigint \
+         FROM usage_events e LEFT JOIN usage_settlements s ON s.event_id = e.id \
+         WHERE e.source_id = $1",
+    )
+    .bind(id)
+    .fetch_one(&db.pool)
+    .await
+    .unwrap();
+    assert_eq!((events, settled), (1, 0), "one event, never settled");
+    assert!(billed > 0, "billed at the estimate, not zero");
     db.cleanup().await;
 }
 

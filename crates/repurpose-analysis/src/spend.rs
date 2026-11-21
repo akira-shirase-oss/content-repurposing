@@ -1,5 +1,7 @@
 //! The spend port: every model call is admitted against the tenant's and the global
-//! cap *before* it starts, and settled with its real usage after.
+//! cap *before* it starts, recorded as one usage event at its estimate in that same
+//! admission, and settled with its real usage after. A call that fails, times out or is
+//! killed keeps its estimate: providers bill those too.
 
 use std::sync::{Arc, Mutex};
 
@@ -37,21 +39,34 @@ pub enum SpendError {
     Unavailable,
 }
 
-/// A reservation: `reserved` micro-dollars held until settled.
+/// The most a call can use: its input estimate and its output cap, and their price.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Estimate {
+    pub usage: Usage,
+    pub cost: u64,
+}
+
+/// A reservation: `reserved` micro-dollars held until settled, and the usage event that
+/// already records the call at its estimate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Admission {
     pub id: u64,
     pub reserved: u64,
+    pub event: u128,
 }
 
 pub trait Spend: Send + Sync {
-    /// Reserves `estimate` micro-dollars, or refuses when a cap would be crossed.
-    fn admit(&self, estimate: u64) -> BoxFuture<'_, Result<Admission, SpendError>>;
-    /// Replaces the reservation with the actual cost and records one usage event.
+    /// Reserves `estimate.cost` micro-dollars and records one usage event for `model` at
+    /// the estimate, or refuses (recording nothing) when a cap would be crossed.
+    fn admit(
+        &self,
+        model: &str,
+        estimate: Estimate,
+    ) -> BoxFuture<'_, Result<Admission, SpendError>>;
+    /// Replaces the reservation with the actual cost and settles the call's usage event.
     fn settle(
         &self,
         admission: Admission,
-        model: &str,
         usage: Usage,
         cost: u64,
     ) -> BoxFuture<'_, Result<(), SpendError>>;
@@ -85,7 +100,8 @@ impl MemorySpend {
         self.inner.lock().map_or(0, |l| l.spent)
     }
 
-    /// The usage events recorded so far: one per settled call.
+    /// The usage events recorded so far: one per admitted call, at its settled usage
+    /// (or its estimate until settled).
     pub fn events(&self) -> Vec<(String, Usage, u64)> {
         self.inner
             .lock()
@@ -95,17 +111,25 @@ impl MemorySpend {
 }
 
 impl Spend for MemorySpend {
-    fn admit(&self, estimate: u64) -> BoxFuture<'_, Result<Admission, SpendError>> {
+    fn admit(
+        &self,
+        model: &str,
+        estimate: Estimate,
+    ) -> BoxFuture<'_, Result<Admission, SpendError>> {
         let result = match self.inner.lock() {
             Ok(mut ledger) => {
-                if ledger.spent.saturating_add(estimate) > ledger.cap {
+                if ledger.spent.saturating_add(estimate.cost) > ledger.cap {
                     Err(SpendError::Exhausted)
                 } else {
-                    ledger.spent += estimate;
+                    ledger.spent += estimate.cost;
+                    ledger
+                        .events
+                        .push((model.to_owned(), estimate.usage, estimate.cost));
                     ledger.next += 1;
                     Ok(Admission {
                         id: ledger.next,
-                        reserved: estimate,
+                        reserved: estimate.cost,
+                        event: u128::from(ledger.next),
                     })
                 }
             }
@@ -117,7 +141,6 @@ impl Spend for MemorySpend {
     fn settle(
         &self,
         admission: Admission,
-        model: &str,
         usage: Usage,
         cost: u64,
     ) -> BoxFuture<'_, Result<(), SpendError>> {
@@ -127,8 +150,17 @@ impl Spend for MemorySpend {
                     .spent
                     .saturating_sub(admission.reserved)
                     .saturating_add(cost);
-                ledger.events.push((model.to_owned(), usage, cost));
-                Ok(())
+                let at = usize::try_from(admission.event)
+                    .ok()
+                    .and_then(|n| n.checked_sub(1));
+                match at.and_then(|at| ledger.events.get_mut(at)) {
+                    Some(event) => {
+                        event.1 = usage;
+                        event.2 = cost;
+                        Ok(())
+                    }
+                    None => Err(SpendError::Unavailable),
+                }
             }
             Err(_) => Err(SpendError::Unavailable),
         };

@@ -6,6 +6,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -105,11 +106,17 @@ enum Script {
     Echo,
 }
 
+/// Requests a cassette keeps for inspection; later calls are counted, not kept.
+pub const MAX_RECORDED: usize = 64;
+
 /// The recorded adapter: replays a cassette (`tests/provider-down/*.json` and friends)
-/// or echoes the source. Records every request it is sent.
+/// or echoes the source. A cassette keeps its first [`MAX_RECORDED`] requests for the
+/// test to inspect; the echo keeps none (it serves the long-running server and the load
+/// scenario). Both count every call.
 #[derive(Debug, Clone)]
 pub struct Recorded {
     script: Script,
+    count: Arc<AtomicU64>,
     calls: Arc<Mutex<Vec<ModelRequest>>>,
 }
 
@@ -122,6 +129,7 @@ impl Recorded {
     pub fn steps(steps: Vec<Step>) -> Self {
         Self {
             script: Script::Steps(steps),
+            count: Arc::default(),
             calls: Arc::default(),
         }
     }
@@ -135,29 +143,37 @@ impl Recorded {
     pub fn echo() -> Self {
         Self {
             script: Script::Echo,
+            count: Arc::default(),
             calls: Arc::default(),
         }
     }
 
-    /// Every request received so far.
+    /// The requests kept so far: a cassette's first [`MAX_RECORDED`], never the echo's.
     pub fn calls(&self) -> Vec<ModelRequest> {
         self.calls.lock().map(|c| c.clone()).unwrap_or_default()
     }
 
+    /// Every call received so far.
+    pub fn call_count(&self) -> u64 {
+        self.count.load(Ordering::SeqCst)
+    }
+
     fn step(&self, request: &ModelRequest) -> Step {
-        let n = match self.calls.lock() {
-            Ok(mut calls) => {
-                calls.push(request.clone());
-                calls.len() - 1
-            }
-            Err(_) => 0,
-        };
+        let n = self.count.fetch_add(1, Ordering::SeqCst);
         match &self.script {
-            Script::Steps(steps) => steps
-                .get(n)
-                .or_else(|| steps.last())
-                .cloned()
-                .unwrap_or(Step::Error(ProviderError::Transport)),
+            Script::Steps(steps) => {
+                if let Ok(mut calls) = self.calls.lock()
+                    && calls.len() < MAX_RECORDED
+                {
+                    calls.push(request.clone());
+                }
+                usize::try_from(n)
+                    .ok()
+                    .and_then(|n| steps.get(n))
+                    .or_else(|| steps.last())
+                    .cloned()
+                    .unwrap_or(Step::Error(ProviderError::Transport))
+            }
             Script::Echo => Step::Reply(echo(&request.source)),
         }
     }
@@ -211,5 +227,44 @@ fn echo(source: &str) -> ModelReply {
             input_tokens: (source.len() / 4) as u64,
             output_tokens,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(n: usize) -> ModelRequest {
+        ModelRequest {
+            system: "s".to_owned(),
+            source: format!("{n}: {}", "Bounded queues keep a service honest under load. ".repeat(200)),
+            repair: None,
+            max_tokens: 10,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_echo_keeps_no_request() {
+        let model = Recorded::echo();
+        for n in 0..1_000 {
+            assert!(model.complete(&request(n)).await.is_ok());
+        }
+        assert_eq!(model.call_count(), 1_000);
+        assert!(model.calls().is_empty(), "the echo retains no request body");
+    }
+
+    #[tokio::test]
+    async fn a_cassette_keeps_a_bounded_prefix_and_counts_the_rest() {
+        let model = Recorded::steps(vec![Step::Error(ProviderError::Overloaded)]);
+        for n in 0..(MAX_RECORDED + 100) {
+            assert_eq!(
+                model.complete(&request(n)).await,
+                Err(ProviderError::Overloaded)
+            );
+        }
+        assert_eq!(model.call_count(), (MAX_RECORDED + 100) as u64);
+        let kept = model.calls();
+        assert_eq!(kept.len(), MAX_RECORDED);
+        assert_eq!(kept[0], request(0));
     }
 }

@@ -1,8 +1,10 @@
 //! The spend ledger in PostgreSQL: per-workspace and global daily caps, checked and
-//! reserved in one transaction before a model call, settled with one usage event after.
+//! reserved in one transaction before a model call, which also records the call as a
+//! usage event at its estimate; settled after with a usage settlement. A call killed
+//! mid-flight keeps its event at the estimate and its reservation held: never under-billed.
 
 use repurpose_analysis::model::{BoxFuture, Usage};
-use repurpose_analysis::spend::{Admission, Spend, SpendError};
+use repurpose_analysis::spend::{Admission, Estimate, Spend, SpendError};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -38,8 +40,8 @@ fn unavailable(_: sqlx::Error) -> SpendError {
 }
 
 impl PgSpend {
-    async fn admit_tx(&self, estimate: u64) -> Result<Admission, SpendError> {
-        let estimate = i64::try_from(estimate).map_err(|_| SpendError::Exhausted)?;
+    async fn admit_tx(&self, model: &str, est: Estimate) -> Result<Admission, SpendError> {
+        let estimate = i64::try_from(est.cost).map_err(|_| SpendError::Exhausted)?;
         let mut tx = self.pool.begin().await.map_err(unavailable)?;
         // The UTC day as days since 2000-01-01 is the admission id: settling hits the same
         // day's rows even across midnight.
@@ -85,17 +87,32 @@ impl PgSpend {
             .await
             .map_err(unavailable)?;
         }
+        let event = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO usage_events (id, workspace_id, source_id, model, input_tokens, output_tokens, cost_micros) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(event)
+        .bind(self.workspace)
+        .bind(self.source)
+        .bind(model)
+        .bind(i64::try_from(est.usage.input_tokens).unwrap_or(i64::MAX))
+        .bind(i64::try_from(est.usage.output_tokens).unwrap_or(i64::MAX))
+        .bind(estimate)
+        .execute(&mut *tx)
+        .await
+        .map_err(unavailable)?;
         tx.commit().await.map_err(unavailable)?;
         Ok(Admission {
             id: u64::try_from(day).unwrap_or(0),
             reserved: u64::try_from(estimate).unwrap_or(0),
+            event: event.as_u128(),
         })
     }
 
     async fn settle_tx(
         &self,
         admission: Admission,
-        model: &str,
         usage: Usage,
         cost: u64,
     ) -> Result<(), SpendError> {
@@ -118,13 +135,10 @@ impl PgSpend {
             .map_err(unavailable)?;
         }
         sqlx::query(
-            "INSERT INTO usage_events (id, workspace_id, source_id, model, input_tokens, output_tokens, cost_micros) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            "INSERT INTO usage_settlements (event_id, input_tokens, output_tokens, cost_micros) \
+             VALUES ($1, $2, $3, $4)",
         )
-        .bind(Uuid::now_v7())
-        .bind(self.workspace)
-        .bind(self.source)
-        .bind(model)
+        .bind(Uuid::from_u128(admission.event))
         .bind(i64::try_from(usage.input_tokens).unwrap_or(i64::MAX))
         .bind(i64::try_from(usage.output_tokens).unwrap_or(i64::MAX))
         .bind(cost)
@@ -136,19 +150,22 @@ impl PgSpend {
 }
 
 impl Spend for PgSpend {
-    fn admit(&self, estimate: u64) -> BoxFuture<'_, Result<Admission, SpendError>> {
-        Box::pin(self.admit_tx(estimate))
+    fn admit(
+        &self,
+        model: &str,
+        estimate: Estimate,
+    ) -> BoxFuture<'_, Result<Admission, SpendError>> {
+        let model = model.to_owned();
+        Box::pin(async move { self.admit_tx(&model, estimate).await })
     }
 
     fn settle(
         &self,
         admission: Admission,
-        model: &str,
         usage: Usage,
         cost: u64,
     ) -> BoxFuture<'_, Result<(), SpendError>> {
-        let model = model.to_owned();
-        Box::pin(async move { self.settle_tx(admission, &model, usage, cost).await })
+        Box::pin(self.settle_tx(admission, usage, cost))
     }
 }
 

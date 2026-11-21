@@ -16,7 +16,9 @@ WITH expected_triggers (tbl, name, digest) AS (
            ('account_events', 'account_events_no_truncate', '91d454c7d8890d590a6e8305d980409e'),
            ('account_events', 'account_events_stamp', '0558d12b98ccd7beaf941f03835399de'),
            ('usage_events', 'usage_events_append_only', '2c1ba9f0bd3f158e099f1796e8b367ac'),
-           ('usage_events', 'usage_events_no_truncate', '6629500bed9cfd56927c36eec9188355')
+           ('usage_events', 'usage_events_no_truncate', '6629500bed9cfd56927c36eec9188355'),
+           ('usage_settlements', 'usage_settlements_append_only', '45d2261ae2f593d87046430b42769174'),
+           ('usage_settlements', 'usage_settlements_no_truncate', 'b80b2d15a5a5e9f3d97ee4b5ea692b08')
 ), expected_functions (name, digest) AS (
     -- The whole definition, body and settings included.
     VALUES ('refuse_change', 'aa7b64a277372e0a3e2126f016e3a79d'),
@@ -35,6 +37,7 @@ WITH expected_triggers (tbl, name, digest) AS (
            ('sources', 'DELETE,INSERT,SELECT,UPDATE'),
            ('spend_days', 'INSERT,SELECT,UPDATE'),
            ('usage_events', 'INSERT,SELECT'),
+           ('usage_settlements', 'INSERT,SELECT'),
            ('users', 'DELETE,INSERT,SELECT,UPDATE'),
            ('workspaces', 'DELETE,INSERT,SELECT,UPDATE')
 ), tables AS (

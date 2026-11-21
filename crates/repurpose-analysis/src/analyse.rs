@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use crate::model::{Model, ModelReply, ModelRequest, ProviderError, Stop, Usage};
 use crate::spans::{self, Span};
-use crate::spend::{Price, Spend, SpendError};
+use crate::spend::{Estimate, Price, Spend, SpendError};
 
 /// The instructions, versioned: a change here is a new `PROMPT_VERSION`.
 pub const PROMPT_VERSION: &str = "analysis-v1";
@@ -200,16 +200,19 @@ fn accept(raw: RawIdea, source: &str, s: &Settings) -> Option<Idea> {
     })
 }
 
-fn estimate(request: &ModelRequest, price: Price) -> u64 {
+fn estimate(request: &ModelRequest, price: Price) -> Estimate {
     let bytes = request.system.len()
         + request.source.len()
         + request.repair.as_ref().map_or(0, String::len);
     // A token is about four bytes of English; three is the conservative side.
-    let input_tokens = (bytes / 3 + 64) as u64;
-    price.cost(Usage {
-        input_tokens,
+    let usage = Usage {
+        input_tokens: (bytes / 3 + 64) as u64,
         output_tokens: u64::from(request.max_tokens),
-    })
+    };
+    Estimate {
+        usage,
+        cost: price.cost(usage),
+    }
 }
 
 /// Analyses `source`. Every call is admitted by `spend` first: when the cap is reached no
@@ -232,8 +235,9 @@ pub async fn analyse(
     let mut cost = 0u64;
     let mut backoff = settings.backoff;
     loop {
+        let estimate = estimate(&request, settings.price);
         let admission = spend
-            .admit(estimate(&request, settings.price))
+            .admit(model.id(), estimate)
             .await
             .map_err(|e| match e {
                 SpendError::Exhausted => AnalysisError::BudgetExhausted,
@@ -245,13 +249,17 @@ pub async fn analyse(
                 Ok(outcome) => outcome,
                 Err(_) => Err(ProviderError::Timeout),
             };
-        let used = outcome.as_ref().map(|r| r.usage).unwrap_or_default();
-        let call_cost = settings.price.cost(used);
+        // A failed call is billed at its estimate: providers charge for timeouts and
+        // mid-stream failures, and no partial usage comes back with an error.
+        let (used, call_cost) = match &outcome {
+            Ok(reply) => (reply.usage, settings.price.cost(reply.usage)),
+            Err(_) => (estimate.usage, estimate.cost),
+        };
         usage.input_tokens += used.input_tokens;
         usage.output_tokens += used.output_tokens;
         cost += call_cost;
         spend
-            .settle(admission, model.id(), used, call_cost)
+            .settle(admission, used, call_cost)
             .await
             .map_err(|_| AnalysisError::LedgerUnavailable)?;
         let reply = match outcome {
