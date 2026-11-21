@@ -51,3 +51,16 @@ quote the service found is a claim the service can prove. Until a live provider 
 the server runs the recorded adapter (it quotes source sentences back) and says so at
 start-up; the provider client is owed before M1 can be *Done*.
 
+
+## D-006 — A usage event is written when a call is admitted; failed calls are billed
+
+Providers bill timeouts and mid-stream failures, so a call that errors is settled at its
+reserved estimate, never at zero. The usage event (model, estimated tokens and cost) is
+written in the same transaction that reserves the spend, before the call starts, and a
+successful call adds one append-only `usage_settlements` row with its real usage. So no
+provider call is ever without a usage event, and END_GOAL #10's "usage events equal
+provider calls" holds exactly in every run without kills. A worker killed after the
+admission commits and before the request leaves has an event (billed at the estimate) for
+a call that never happened: at most one per in-flight job per kill, and the error is
+always over-billing, never a call nobody paid for. The job-queue harness reports both
+directions (`unrecorded_calls`, which must be zero, and `events_without_call`).

@@ -22,6 +22,8 @@ pub struct Policy {
     /// Test fixtures only: loopback addresses and any port. Unreachable without the
     /// `test-support` feature.
     loopback_fixture: bool,
+    /// Test fixtures only: the one non-default port a fixture policy may dial.
+    fixture_port: Option<u16>,
 }
 
 impl Default for Policy {
@@ -29,6 +31,7 @@ impl Default for Policy {
         Self {
             allow_http: true,
             loopback_fixture: false,
+            fixture_port: None,
         }
     }
 }
@@ -40,6 +43,17 @@ impl Policy {
         Self {
             allow_http: true,
             loopback_fixture: true,
+            fixture_port: None,
+        }
+    }
+
+    /// A fixture policy that may dial only `port` besides 80 and 443, so a redirect to
+    /// any other port is refused as it is in production.
+    #[cfg(feature = "test-support")]
+    pub fn loopback_fixture_on(port: u16) -> Self {
+        Self {
+            fixture_port: Some(port),
+            ..Self::loopback_fixture()
         }
     }
 
@@ -76,7 +90,8 @@ pub fn check_parsed(url: &Url, policy: Policy) -> Result<(), Refusal> {
         return Err(Refusal::Credentials);
     }
     let port = url.port_or_known_default().ok_or(Refusal::BadUrl)?;
-    if !policy.loopback_fixture && port != 80 && port != 443 {
+    let fixture = policy.loopback_fixture && policy.fixture_port.is_none_or(|p| p == port);
+    if !fixture && port != 80 && port != 443 {
         return Err(Refusal::Port);
     }
     match url.host() {

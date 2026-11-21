@@ -35,17 +35,39 @@ pub fn is_plain_text(content_type: Option<&str>) -> bool {
 /// Inflates a gzip body, refusing to produce more than `max` bytes. The decoder stops at
 /// `max + 1`, so a bomb costs at most `max` bytes of memory and that much inflation.
 pub fn gunzip(wire: &[u8], max: usize) -> Result<Vec<u8>, FetchError> {
+    gunzip_counted(wire, max).0
+}
+
+/// [`gunzip`], also returning how many bytes the decoder inflated.
+pub fn gunzip_counted(wire: &[u8], max: usize) -> (Result<Vec<u8>, FetchError>, u64) {
     let mut out = Vec::new();
-    let decoder = flate2::read::MultiGzDecoder::new(wire);
+    let mut decoder = Counted {
+        inner: flate2::read::MultiGzDecoder::new(wire),
+        read: 0,
+    };
     let limit = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1);
-    decoder
-        .take(limit)
-        .read_to_end(&mut out)
-        .map_err(|_| FetchError::CorruptEncoding)?;
-    if out.len() > max {
-        return Err(FetchError::DecompressionBomb);
+    let read = (&mut decoder).take(limit).read_to_end(&mut out);
+    let inflated = decoder.read;
+    if read.is_err() {
+        return (Err(FetchError::CorruptEncoding), inflated);
     }
-    Ok(out)
+    if out.len() > max {
+        return (Err(FetchError::DecompressionBomb), inflated);
+    }
+    (Ok(out), inflated)
+}
+
+struct Counted<R> {
+    inner: R,
+    read: u64,
+}
+
+impl<R: Read> Read for Counted<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.read = self.read.saturating_add(n as u64);
+        Ok(n)
+    }
 }
 
 /// Decodes a page: a byte-order mark wins, then the `Content-Type` charset, then a
@@ -171,5 +193,24 @@ mod tests {
             Ok(16 * 1024 * 1024)
         );
         assert_eq!(gunzip(b"not gzip", 1024), Err(FetchError::CorruptEncoding));
+    }
+
+    /// The bound is the `take`, not the size check after it: a bomb far over the limit
+    /// is inflated only to the limit plus one read buffer.
+    #[test]
+    fn gzip_inflates_no_more_than_the_limit() {
+        use flate2::{Compression, write::GzEncoder};
+        use std::io::Write;
+        let mut enc = GzEncoder::new(Vec::new(), Compression::best());
+        let zeros = vec![0u8; 1024 * 1024];
+        for _ in 0..64 {
+            enc.write_all(&zeros).unwrap_or_default();
+        }
+        let bomb = enc.finish().unwrap_or_default();
+        assert!(bomb.len() < 128 * 1024);
+        let max = 1024 * 1024;
+        let (out, inflated) = gunzip_counted(&bomb, max);
+        assert_eq!(out, Err(FetchError::DecompressionBomb));
+        assert!(inflated <= (max + 64 * 1024) as u64, "inflated {inflated}");
     }
 }

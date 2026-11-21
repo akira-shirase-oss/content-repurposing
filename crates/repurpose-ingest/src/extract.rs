@@ -270,7 +270,11 @@ impl TreeSink for Bounded {
 
 /// Parses `html` in chunks through the counting sink; stops at the first chunk that
 /// crosses a bound or after `cancel` is set.
-fn parse(html: &str, limits: &Limits, cancel: &AtomicBool) -> (Result<Document, ExtractError>, Work) {
+fn parse(
+    html: &str,
+    limits: &Limits,
+    cancel: &AtomicBool,
+) -> (Result<Document, ExtractError>, Work) {
     let budget = Rc::new(Budget {
         max_depth: limits.max_depth,
         max_elements: limits.max_elements,

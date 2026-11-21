@@ -14,12 +14,17 @@ use uuid::Uuid;
 // LIMIT(source-attempts)
 pub const MAX_ATTEMPTS: i32 = 5;
 
+/// The per-workspace lock a submission holds.
+pub const SUBMIT_LOCK: &str = "SELECT 1 FROM workspaces WHERE id = $1 FOR NO KEY UPDATE";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Submitted {
     /// A new source, queued.
     Created(Uuid),
-    /// The same idempotency key was used before: that source.
+    /// The same idempotency key was used before, for the same URL: that source.
     Existing(Uuid),
+    /// The same idempotency key was used before for another URL.
+    KeyReused,
     /// The workspace already has this many unfinished sources.
     QueueFull,
 }
@@ -34,18 +39,23 @@ pub async fn submit(
     max_pending: i64,
 ) -> Result<Submitted, DbError> {
     let mut tx = pool.begin().await?;
-    // Serialises submissions per workspace so the queue bound cannot be raced.
-    sqlx::query("SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE")
+    // Serialises submissions per workspace so the queue bound cannot be raced; NO KEY
+    // leaves the key-share lock a foreign-key insert takes free.
+    sqlx::query(SUBMIT_LOCK)
         .bind(workspace)
         .execute(&mut *tx)
         .await?;
     if let Some(row) =
-        sqlx::query("SELECT id FROM sources WHERE workspace_id = $1 AND idempotency_key = $2")
+        sqlx::query("SELECT id, url FROM sources WHERE workspace_id = $1 AND idempotency_key = $2")
             .bind(workspace)
             .bind(key)
             .fetch_optional(&mut *tx)
             .await?
     {
+        let stored: String = row.try_get("url")?;
+        if stored != url {
+            return Ok(Submitted::KeyReused);
+        }
         return Ok(Submitted::Existing(row.try_get("id")?));
     }
     let pending: i64 = sqlx::query_scalar(

@@ -28,6 +28,9 @@ pub struct Settings {
     pub backoff: Duration,
     /// A longer `retry-after` is not waited for: the analysis fails instead.
     pub max_retry_after: Duration,
+    /// The whole analysis, every call and wait included: no retry starts that could end
+    /// after it. Inside the job deadline, with room for the fetch.
+    pub deadline: Duration,
     pub max_tokens: u32,
     pub max_ideas: usize,
     pub max_quotes: usize,
@@ -44,6 +47,8 @@ impl Default for Settings {
             call_timeout: Duration::from_secs(60),
             backoff: Duration::from_secs(1),
             max_retry_after: Duration::from_secs(30),
+            // LIMIT(analysis-deadline)
+            deadline: Duration::from_secs(150),
             max_tokens: 2_000,
             // LIMIT(analysis-ideas)
             max_ideas: 12,
@@ -200,6 +205,21 @@ fn accept(raw: RawIdea, source: &str, s: &Settings) -> Option<Idea> {
     })
 }
 
+/// Half the backoff plus a random part of the other half: workers that failed together
+/// do not retry together.
+fn jittered(backoff: Duration, random: u64) -> Duration {
+    let half = backoff / 2;
+    let span = u64::try_from(half.as_nanos()).unwrap_or(u64::MAX);
+    half + Duration::from_nanos(random % span.saturating_add(1))
+}
+
+fn random() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish()
+}
+
 fn estimate(request: &ModelRequest, price: Price) -> Estimate {
     let bytes = request.system.len()
         + request.source.len()
@@ -234,7 +254,12 @@ pub async fn analyse(
     let mut usage = Usage::default();
     let mut cost = 0u64;
     let mut backoff = settings.backoff;
+    let started = tokio::time::Instant::now();
     loop {
+        let left = settings.deadline.saturating_sub(started.elapsed());
+        if left.is_zero() {
+            return Err(AnalysisError::ProviderUnavailable);
+        }
         let estimate = estimate(&request, settings.price);
         let admission = spend
             .admit(model.id(), estimate)
@@ -245,7 +270,9 @@ pub async fn analyse(
             })?;
         calls += 1;
         let outcome =
-            match tokio::time::timeout(settings.call_timeout, model.complete(&request)).await {
+            match tokio::time::timeout(settings.call_timeout.min(left), model.complete(&request))
+                .await
+            {
                 Ok(outcome) => outcome,
                 Err(_) => Err(ProviderError::Timeout),
             };
@@ -275,9 +302,11 @@ pub async fn analyse(
                     ProviderError::RateLimited {
                         retry_after_secs: Some(secs),
                     } => Duration::from_secs(secs),
-                    _ => backoff,
+                    _ => jittered(backoff, random()),
                 };
-                if wait > settings.max_retry_after {
+                if wait > settings.max_retry_after
+                    || started.elapsed().saturating_add(wait) >= settings.deadline
+                {
                     return Err(AnalysisError::ProviderUnavailable);
                 }
                 tokio::time::sleep(wait).await;

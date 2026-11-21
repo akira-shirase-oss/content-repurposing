@@ -79,8 +79,9 @@ async fn transient_failures_back_off_then_succeed() {
     let analysis = out.unwrap();
     assert_eq!(analysis.calls, 3);
     assert_eq!(model.calls().len(), 3);
-    // Backoff 1 s then 2 s.
-    assert_eq!(started.elapsed().as_secs(), 3);
+    // Backoff 1 s then 2 s, jittered down to half.
+    let waited = started.elapsed();
+    assert!(waited >= Duration::from_millis(1_500) && waited <= Duration::from_secs(3));
     let (out, _, _) = run("provider-down/rate-limited-retry-after").await;
     assert_eq!(out.unwrap().calls, 2);
 }
@@ -199,9 +200,13 @@ async fn injected_source_text_stays_data() {
         .unwrap();
     let sent = model.sent.lock().unwrap().clone();
     assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0].source, INJECTED, "the source travels in its own field");
+    assert_eq!(
+        sent[0].source, INJECTED,
+        "the source travels in its own field"
+    );
     assert!(
-        !sent[0].system.contains("Ignore all previous") && !sent[0].system.contains("Bounded queues"),
+        !sent[0].system.contains("Ignore all previous")
+            && !sent[0].system.contains("Bounded queues"),
         "source text never enters the instructions"
     );
     for idea in &analysis.ideas {
@@ -230,7 +235,10 @@ async fn a_model_that_obeys_the_injection_ships_nothing_unsourced() {
     let analysis = analyse(&model, &spend(), INJECTED, &Settings::default())
         .await
         .unwrap();
-    assert_eq!(analysis.refused, 1, "the injected quote is not in the source");
+    assert_eq!(
+        analysis.refused, 1,
+        "the injected quote is not in the source"
+    );
     assert_eq!(analysis.ideas.len(), 1);
     assert_eq!(analysis.ideas[0].text, "Queues");
 }
@@ -262,7 +270,11 @@ async fn failed_calls_are_billed_at_their_estimate() {
         let (out, model, ledger) = run(name).await;
         assert_eq!(out, Err(AnalysisError::ProviderUnavailable), "{name}");
         let events = ledger.events();
-        assert_eq!(events.len(), model.calls().len(), "{name}: an event per call");
+        assert_eq!(
+            events.len(),
+            model.calls().len(),
+            "{name}: an event per call"
+        );
         for (_, usage, cost) in &events {
             assert!(*cost > 0, "{name}: a failed call is not settled at zero");
             assert!(usage.input_tokens > 0 && usage.output_tokens > 0, "{name}");
@@ -273,4 +285,43 @@ async fn failed_calls_are_billed_at_their_estimate() {
             "{name}: the ledger holds what the events bill"
         );
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn retries_are_jittered_within_half_to_the_full_backoff() {
+    let mut waits = Vec::new();
+    for _ in 0..8 {
+        let started = tokio::time::Instant::now();
+        let (out, _, _) = run("provider-down/recovers").await;
+        assert_eq!(out.unwrap().calls, 3);
+        let waited = started.elapsed();
+        // Backoff 1 s then 2 s, each jittered down to half.
+        assert!(waited >= Duration::from_millis(1_500) && waited <= Duration::from_secs(3));
+        waits.push(waited);
+    }
+    waits.dedup();
+    assert!(
+        waits.len() > 1,
+        "eight analyses retried in lockstep: {waits:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn retries_never_outlast_the_analysis_deadline() {
+    let settings = Settings {
+        max_attempts: 10,
+        ..Settings::default()
+    };
+    assert!(settings.deadline < Duration::from_mins(4));
+    let model = Recorded::steps(vec![repurpose_analysis::model::Step::Hang]);
+    let ledger = spend();
+    let started = tokio::time::Instant::now();
+    let out = analyse(&model, &ledger, SOURCE, &settings).await;
+    assert_eq!(out, Err(AnalysisError::ProviderUnavailable));
+    assert!(
+        started.elapsed() <= settings.deadline,
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(ledger.events().len() as u64, model.call_count());
 }

@@ -159,6 +159,10 @@ async fn submit(
         Submitted::Existing(id) => {
             Ok((StatusCode::OK, axum::Json(json!({ "id": id }))).into_response())
         }
+        Submitted::KeyReused => Err(SourcesError::Invalid(
+            "idempotency_key_reused",
+            "this Idempotency-Key was used for another URL",
+        )),
         Submitted::QueueFull => Err(SourcesError::QueueFull),
     }
 }

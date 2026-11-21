@@ -7,4 +7,4 @@ pub mod store;
 pub mod worker;
 
 pub use routes::{Sources, router};
-pub use worker::{Outcome, Worker, WorkerSettings};
+pub use worker::{Drained, Outcome, Worker, WorkerSettings};

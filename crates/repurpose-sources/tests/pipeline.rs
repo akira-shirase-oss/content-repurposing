@@ -150,7 +150,7 @@ async fn resubmitting_with_the_same_key_is_a_no_op_and_the_queue_is_bounded() {
     let ws = workspace(&db.pool).await;
     let first = submit(&db.pool, ws, "same", "https://example.com/a").await;
     assert_eq!(
-        store::submit(&db.pool, ws, "same", "https://example.com/other", 100)
+        store::submit(&db.pool, ws, "same", "https://example.com/a", 100)
             .await
             .unwrap(),
         Submitted::Existing(first)
@@ -355,10 +355,7 @@ async fn usage_events_are_append_only() {
         source: None,
     };
     let a = spend.admit("recorded", est(10)).await.unwrap();
-    spend
-        .settle(a, Usage::default(), 0)
-        .await
-        .unwrap();
+    spend.settle(a, Usage::default(), 0).await.unwrap();
     assert!(
         sqlx::query("UPDATE usage_events SET cost_micros = 0")
             .execute(&db.pool)
@@ -458,9 +455,12 @@ async fn provider_failures_end_named_and_store_no_ideas() {
 }
 
 /// Counts calls in flight at once; each call takes a while.
+/// Holds each call until `barrier`'s size of calls are in flight at once: concurrency is
+/// proved by arrival, not by sleeping and hoping the jobs overlap.
 struct Gauge {
     now: std::sync::atomic::AtomicUsize,
     peak: std::sync::atomic::AtomicUsize,
+    barrier: tokio::sync::Barrier,
 }
 
 impl Model for Gauge {
@@ -479,7 +479,7 @@ impl Model for Gauge {
         Box::pin(async move {
             let n = self.now.fetch_add(1, SeqCst) + 1;
             self.peak.fetch_max(n, SeqCst);
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            self.barrier.wait().await;
             self.now.fetch_sub(1, SeqCst);
             Recorded::echo().complete(request).await
         })
@@ -494,9 +494,12 @@ async fn the_worker_runs_at_most_its_concurrency_and_drains() {
     for n in 0..24 {
         submit(&db.pool, ws, &format!("k{n}"), &site.url("/article")).await;
     }
+    let concurrency = WorkerSettings::default().concurrency;
+    assert_eq!(24 % concurrency, 0, "every barrier generation fills");
     let gauge = Arc::new(Gauge {
         now: 0.into(),
         peak: 0.into(),
+        barrier: tokio::sync::Barrier::new(concurrency),
     });
     let mut w = worker(&db.pool, gauge.clone(), Caps::default());
     w.settings.idle_poll = Duration::from_millis(20);
@@ -529,6 +532,103 @@ async fn the_worker_runs_at_most_its_concurrency_and_drains() {
         peak <= WorkerSettings::default().concurrency.min(8),
         "peak {peak}"
     );
-    assert!(peak > 1, "jobs ran concurrently");
+    assert_eq!(
+        peak, concurrency,
+        "a full set of jobs ran at once, and never more"
+    );
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_reused_key_for_another_url_is_refused() {
+    let db = TestDb::new().await;
+    let ws = workspace(&db.pool).await;
+    let first = submit(&db.pool, ws, "k", "https://example.com/a").await;
+    assert_eq!(
+        store::submit(&db.pool, ws, "k", "https://example.com/a", 100)
+            .await
+            .unwrap(),
+        Submitted::Existing(first)
+    );
+    assert_eq!(
+        store::submit(&db.pool, ws, "k", "https://example.com/b", 100)
+            .await
+            .unwrap(),
+        Submitted::KeyReused
+    );
+    assert_eq!(count(&db.pool, "SELECT count(*) FROM sources").await, 1);
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn the_submission_lock_leaves_foreign_key_checks_free() {
+    let db = TestDb::new().await;
+    let ws = workspace(&db.pool).await;
+    let mut held = db.pool.begin().await.unwrap();
+    sqlx::query(store::SUBMIT_LOCK)
+        .bind(ws)
+        .execute(&mut *held)
+        .await
+        .unwrap();
+    // The lock a foreign-key insert takes on the row it references.
+    let mut other = db.pool.begin().await.unwrap();
+    let shared = sqlx::query("SELECT 1 FROM workspaces WHERE id = $1 FOR KEY SHARE NOWAIT")
+        .bind(ws)
+        .execute(&mut *other)
+        .await;
+    assert!(shared.is_ok(), "{shared:?}");
+    // Another submission still waits its turn.
+    let mut third = db.pool.begin().await.unwrap();
+    let queued = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{} NOWAIT",
+        store::SUBMIT_LOCK
+    )))
+    .bind(ws)
+    .execute(&mut *third)
+    .await;
+    assert!(queued.is_err());
+    drop((held, other, third));
+    db.cleanup().await;
+}
+
+/// A model whose call panics: a bug in a job, which the worker must report, not lose.
+struct Panics;
+
+impl Model for Panics {
+    fn id(&self) -> &'static str {
+        "panics"
+    }
+
+    fn complete<'a>(
+        &'a self,
+        _request: &'a repurpose_analysis::model::ModelRequest,
+    ) -> repurpose_analysis::model::BoxFuture<
+        'a,
+        Result<ModelReply, repurpose_analysis::model::ProviderError>,
+    > {
+        Box::pin(async { panic!("a bug in a job") })
+    }
+}
+
+#[tokio::test]
+async fn a_panicking_job_is_reported_when_the_worker_drains() {
+    let db = TestDb::new().await;
+    let site = pages().await;
+    let ws = workspace(&db.pool).await;
+    submit(&db.pool, ws, "k", &site.url("/article")).await;
+    let mut w = worker(&db.pool, Arc::new(Panics), Caps::default());
+    w.settings.idle_poll = Duration::from_millis(20);
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let running = tokio::spawn(Arc::new(w).run(shutdown.clone()));
+    for _ in 0..600 {
+        if count(&db.pool, "SELECT count(*) FROM usage_events").await == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    shutdown.cancel();
+    let drained = running.await.unwrap();
+    assert_eq!(drained.panicked, 1);
+    assert!(!drained.clean());
     db.cleanup().await;
 }

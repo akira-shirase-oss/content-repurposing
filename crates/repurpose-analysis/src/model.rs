@@ -237,7 +237,10 @@ mod tests {
     fn request(n: usize) -> ModelRequest {
         ModelRequest {
             system: "s".to_owned(),
-            source: format!("{n}: {}", "Bounded queues keep a service honest under load. ".repeat(200)),
+            source: format!(
+                "{n}: {}",
+                "Bounded queues keep a service honest under load. ".repeat(200)
+            ),
             repair: None,
             max_tokens: 10,
         }

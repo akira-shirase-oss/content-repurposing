@@ -50,6 +50,31 @@ pub struct Worker {
     pub settings: WorkerSettings,
 }
 
+/// How the worker loop ended: every job task joined, none lost silently.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Drained {
+    /// Job tasks that panicked; their leases lapse and the job runs again.
+    pub panicked: usize,
+    /// Job tasks still running at the drain deadline, aborted.
+    pub abandoned: usize,
+}
+
+impl Drained {
+    fn reap(&mut self, done: Result<(), tokio::task::JoinError>) {
+        if let Err(error) = done
+            && error.is_panic()
+        {
+            self.panicked += 1;
+            tracing::error!(code = "job_panicked", "a job task panicked");
+        }
+    }
+
+    /// Whether every job task ended on its own.
+    pub fn clean(&self) -> bool {
+        self.panicked == 0 && self.abandoned == 0
+    }
+}
+
 /// What became of one job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -70,9 +95,14 @@ enum Failure {
 impl Worker {
     /// Claims and runs jobs until `shutdown`; in-flight jobs finish (or hit their
     /// deadline) before it returns.
-    pub async fn run(self: Arc<Self>, shutdown: CancellationToken) {
+    pub async fn run(self: Arc<Self>, shutdown: CancellationToken) -> Drained {
         let permits = Arc::new(Semaphore::new(self.settings.concurrency.max(1)));
+        let mut tasks = tokio::task::JoinSet::new();
+        let mut drained = Drained::default();
         loop {
+            while let Some(done) = tasks.try_join_next() {
+                drained.reap(done);
+            }
             let permit = tokio::select! {
                 () = shutdown.cancelled() => break,
                 permit = Arc::clone(&permits).acquire_owned() => match permit {
@@ -80,22 +110,38 @@ impl Worker {
                     Err(_) => break,
                 },
             };
-            if let Ok(Some(job)) = store::claim(&self.pool, self.settings.lease).await {
+            let claimed = store::claim(&self.pool, self.settings.lease).await;
+            if let Ok(Some(job)) = claimed {
                 let worker = Arc::clone(&self);
-                tokio::spawn(async move {
+                tasks.spawn(async move {
                     let _permit = permit;
                     worker.finish(job).await;
                 });
-            } else {
-                drop(permit);
-                tokio::select! {
-                    () = shutdown.cancelled() => break,
-                    () = tokio::time::sleep(self.settings.idle_poll) => {}
+                continue;
+            }
+            if claimed.is_err() {
+                tracing::warn!(code = "store_unavailable", "claim failed");
+            }
+            drop(permit);
+            tokio::select! {
+                () = shutdown.cancelled() => break,
+                () = tokio::time::sleep(self.settings.idle_poll) => {}
+            }
+        }
+        let deadline = tokio::time::Instant::now() + self.settings.job_deadline;
+        while !tasks.is_empty() {
+            match tokio::time::timeout_at(deadline, tasks.join_next()).await {
+                Ok(Some(done)) => drained.reap(done),
+                Ok(None) => break,
+                Err(_) => {
+                    drained.abandoned = tasks.len();
+                    tasks.abort_all();
+                    while tasks.join_next().await.is_some() {}
+                    break;
                 }
             }
         }
-        let all = u32::try_from(self.settings.concurrency.max(1)).unwrap_or(u32::MAX);
-        let _ = tokio::time::timeout(self.settings.job_deadline, permits.acquire_many(all)).await;
+        drained
     }
 
     /// Claims and runs one job inline: tests and drills.
@@ -197,5 +243,11 @@ mod tests {
             "a hung job is failed before another worker may claim it"
         );
         assert!(s.job_deadline <= Duration::from_mins(4));
+        let fetch = repurpose_ingest::fetch::Limits::default().deadline;
+        let analysis = repurpose_analysis::Settings::default().deadline;
+        assert!(
+            fetch + analysis < s.job_deadline,
+            "the analysis gives up before the job deadline cuts it off"
+        );
     }
 }

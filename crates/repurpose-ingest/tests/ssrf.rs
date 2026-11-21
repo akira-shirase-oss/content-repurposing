@@ -95,12 +95,16 @@ async fn ssrf_guard_refuses_redirect_to_private() {
     })
     .await
     .unwrap();
-    let f = fetcher(Policy::loopback_fixture(), Resolver::Canned(canned));
+    let f = fetcher(
+        Policy::loopback_fixture_on(server.port),
+        Resolver::Canned(canned),
+    );
     let cases = [
         ("/to-metadata", REFUSED),
         ("/to-name", REFUSED),
         ("/to-file", FetchError::Refused(Refusal::Scheme)),
         ("/to-gopher", FetchError::Refused(Refusal::Scheme)),
+        ("/to-port", FetchError::Refused(Refusal::Port)),
     ];
     for (path, want) in cases {
         assert_eq!(

@@ -202,6 +202,56 @@ fn url(u: &str) -> Option<Value> {
 }
 
 #[tokio::test]
+async fn a_reused_key_and_an_overlong_encoded_url_are_named() {
+    let kit = Kit::new().await;
+    let alice = kit.user("alice@example.test").await;
+    let a = kit.workspace(&alice).await;
+    let path = format!("/v1/workspaces/{a}/sources");
+    let (status, first) = kit
+        .call(
+            Method::POST,
+            &path,
+            Auth::Session(&alice),
+            Some("k1"),
+            url("https://example.com/post"),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{first}");
+    let (status, body) = kit
+        .call(
+            Method::POST,
+            &path,
+            Auth::Session(&alice),
+            Some("k1"),
+            url("https://example.com/another"),
+        )
+        .await;
+    assert_eq!(
+        (status, body["error"]["code"].as_str()),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some("idempotency_key_reused")
+        )
+    );
+    // Within the cap as typed, over it once percent-encoded: refused by name, not a 500.
+    let encoded = format!("https://example.com/{}", "é".repeat(800));
+    let (status, body) = kit
+        .call(
+            Method::POST,
+            &path,
+            Auth::Session(&alice),
+            Some("encoded"),
+            url(&encoded),
+        )
+        .await;
+    assert_eq!(
+        (status, body["error"]["code"].as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, Some("url_too_long"))
+    );
+    kit.db.cleanup().await;
+}
+
+#[tokio::test]
 async fn submit_is_idempotent_and_refuses_unfetchable_urls_by_name() {
     let kit = Kit::new().await;
     let alice = kit.user("alice@example.test").await;
@@ -251,21 +301,6 @@ async fn submit_is_idempotent_and_refuses_unfetchable_urls_by_name() {
             "{raw}"
         );
     }
-    // Within the cap as typed, over it once percent-encoded: refused by name, not a 500.
-    let encoded = format!("https://example.com/{}", "é".repeat(800));
-    let (status, body) = kit
-        .call(
-            Method::POST,
-            &path,
-            Auth::Session(&alice),
-            Some("encoded"),
-            url(&encoded),
-        )
-        .await;
-    assert_eq!(
-        (status, body["error"]["code"].as_str()),
-        (StatusCode::UNPROCESSABLE_ENTITY, Some("url_too_long"))
-    );
     let (status, body) = kit
         .call(
             Method::POST,

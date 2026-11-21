@@ -279,7 +279,11 @@ impl Fetcher {
             }
         }
         let body = if gzip {
-            decode::gunzip(&wire, self.limits.max_decoded_bytes)?
+            // Inflating up to the decoded cap is CPU work: off the async worker.
+            let max = self.limits.max_decoded_bytes;
+            tokio::task::spawn_blocking(move || decode::gunzip(&wire, max))
+                .await
+                .map_err(|_| FetchError::CorruptEncoding)??
         } else {
             if wire.len() > self.limits.max_decoded_bytes {
                 return Err(FetchError::TooLarge);
