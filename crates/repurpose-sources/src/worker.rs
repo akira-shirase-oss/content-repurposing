@@ -223,6 +223,7 @@ impl Worker {
                 ideas: analysis.ideas,
                 refused: analysis.refused,
                 prompt_version: PROMPT_VERSION,
+                model: self.model.id().to_owned(),
             })
         };
         tokio::time::timeout(self.settings.job_deadline, work)

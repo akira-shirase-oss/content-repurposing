@@ -98,11 +98,10 @@ async fn a_pasted_url_becomes_ideas_with_exact_spans() {
     assert_eq!(view.status, "ready");
     assert!(view.title.is_some());
     assert_ne!(view.ideas.len(), 0);
-    let body: String = sqlx::query_scalar("SELECT body FROM sources WHERE id = $1")
-        .bind(id)
-        .fetch_one(&db.pool)
-        .await
-        .unwrap();
+    // The view carries the text its spans index, and says which model answered.
+    let body = view.body.clone().unwrap();
+    assert_eq!(view.model.as_deref(), Some("recorded"));
+    assert_eq!(view.ideas[0].kind, "summary");
     for idea in &view.ideas {
         assert_ne!(idea.spans.len(), 0);
         for span in &idea.spans {
@@ -630,5 +629,45 @@ async fn a_panicking_job_is_reported_when_the_worker_drains() {
     let drained = running.await.unwrap();
     assert_eq!(drained.panicked, 1);
     assert!(!drained.clean());
+    db.cleanup().await;
+}
+
+#[tokio::test]
+async fn a_member_is_rate_limited_across_workspaces() {
+    let db = TestDb::new().await;
+    let user = Uuid::now_v7();
+    sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1, 'm@example.test', 'x')")
+        .bind(user)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    let limits = store::Limits {
+        pending: 100,
+        per_user_hour: 3,
+    };
+    let (a, b) = (workspace(&db.pool).await, workspace(&db.pool).await);
+    for (ws, key) in [(a, "1"), (a, "2"), (b, "3")] {
+        let out = store::submit_as(
+            &db.pool,
+            ws,
+            Some(user),
+            key,
+            "https://example.com/",
+            limits,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(out, Submitted::Created(_)), "{out:?}");
+    }
+    // A replay is not a new submission.
+    let replay = store::submit_as(&db.pool, a, Some(user), "1", "https://example.com/", limits)
+        .await
+        .unwrap();
+    assert!(matches!(replay, Submitted::Existing(_)), "{replay:?}");
+    let over = store::submit_as(&db.pool, b, Some(user), "4", "https://example.com/", limits)
+        .await
+        .unwrap();
+    assert_eq!(over, Submitted::RateLimited);
+    assert_eq!(count(&db.pool, "SELECT count(*) FROM sources").await, 3);
     db.cleanup().await;
 }

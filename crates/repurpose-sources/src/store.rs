@@ -25,12 +25,33 @@ pub enum Submitted {
     Existing(Uuid),
     /// The same idempotency key was used before for another URL.
     KeyReused,
+    /// The member submitted their hourly allowance.
+    RateLimited,
     /// The workspace already has this many unfinished sources.
     QueueFull,
 }
 
 /// Queues `url` for `workspace`, once per `key`; refused when `max_pending` unfinished
 /// sources already wait. The count and the insert are serialised per workspace.
+/// The bounds a submission is admitted under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    /// Sources waiting or running per workspace.
+    pub pending: i64,
+    /// New sources one member may submit per rolling hour, over all their workspaces.
+    pub per_user_hour: i64,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            pending: 100,      // LIMIT(sources-pending)
+            per_user_hour: 30, // LIMIT(sources-per-user-hour)
+        }
+    }
+}
+
+/// [`submit_as`] with no member: drills and load harnesses.
 pub async fn submit(
     pool: &PgPool,
     workspace: Uuid,
@@ -38,7 +59,31 @@ pub async fn submit(
     url: &str,
     max_pending: i64,
 ) -> Result<Submitted, DbError> {
+    let limits = Limits {
+        pending: max_pending,
+        ..Limits::default()
+    };
+    submit_as(pool, workspace, None, key, url, limits).await
+}
+
+/// Queues `url` for `workspace`, submitted by `user`. Locks the member, then the
+/// workspace (one order everywhere), so neither bound can be raced.
+pub async fn submit_as(
+    pool: &PgPool,
+    workspace: Uuid,
+    user: Option<Uuid>,
+    key: &str,
+    url: &str,
+    limits: Limits,
+) -> Result<Submitted, DbError> {
+    let max_pending = limits.pending;
     let mut tx = pool.begin().await?;
+    if let Some(user) = user {
+        sqlx::query("SELECT 1 FROM users WHERE id = $1 FOR NO KEY UPDATE")
+            .bind(user)
+            .execute(&mut *tx)
+            .await?;
+    }
     // Serialises submissions per workspace so the queue bound cannot be raced; NO KEY
     // leaves the key-share lock a foreign-key insert takes free.
     sqlx::query(SUBMIT_LOCK)
@@ -67,14 +112,28 @@ pub async fn submit(
     if pending >= max_pending {
         return Ok(Submitted::QueueFull);
     }
+    if let Some(user) = user {
+        let recent: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM sources \
+             WHERE submitted_by = $1 AND created_at > now() - interval '1 hour'",
+        )
+        .bind(user)
+        .fetch_one(&mut *tx)
+        .await?;
+        if recent >= limits.per_user_hour {
+            return Ok(Submitted::RateLimited);
+        }
+    }
     let id = Uuid::now_v7();
     sqlx::query(
-        "INSERT INTO sources (id, workspace_id, idempotency_key, url) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO sources (id, workspace_id, idempotency_key, url, submitted_by) \
+         VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(id)
     .bind(workspace)
     .bind(key)
     .bind(url)
+    .bind(user)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -136,6 +195,8 @@ pub struct Done {
     pub ideas: Vec<Idea>,
     pub refused: usize,
     pub prompt_version: &'static str,
+    /// The model that answered.
+    pub model: String,
 }
 
 /// Stores a finished job's article and ideas in one transaction. `false` when the
@@ -144,7 +205,7 @@ pub async fn complete(pool: &PgPool, job: &Job, done: &Done) -> Result<bool, DbE
     let mut tx = pool.begin().await?;
     let updated = sqlx::query(
         "UPDATE sources SET status = 'ready', final_url = $3, title = $4, body = $5, truncated = $6, \
-             refused_ideas = $7, prompt_version = $8, lease_until = NULL, updated_at = now() \
+             refused_ideas = $7, prompt_version = $8, model = $9, lease_until = NULL, updated_at = now() \
          WHERE id = $1 AND attempts = $2 AND status = 'running'",
     )
     .bind(job.id)
@@ -155,6 +216,7 @@ pub async fn complete(pool: &PgPool, job: &Job, done: &Done) -> Result<bool, DbE
     .bind(done.truncated)
     .bind(i32::try_from(done.refused).unwrap_or(i32::MAX))
     .bind(done.prompt_version)
+    .bind(&done.model)
     .execute(&mut *tx)
     .await?
     .rows_affected();
@@ -215,6 +277,8 @@ pub async fn release(pool: &PgPool, job: &Job, after: Duration) -> Result<bool, 
 
 const fn kind_name(kind: Kind) -> &'static str {
     match kind {
+        Kind::Summary => "summary",
+        Kind::Audience => "audience",
         Kind::Idea => "idea",
         Kind::Quote => "quote",
         Kind::Number => "number",
@@ -255,13 +319,17 @@ pub struct SourceView {
     pub title: Option<String>,
     pub truncated: bool,
     pub refused_ideas: i32,
+    /// The article text every span indexes, so a client can check each quote itself.
+    pub body: Option<String>,
+    /// The model that answered: `recorded` is the built-in echo, not a provider.
+    pub model: Option<String>,
     pub ideas: Vec<IdeaView>,
 }
 
 /// One source of `workspace`, with its ideas; `None` when it is not this workspace's.
 pub async fn get(pool: &PgPool, workspace: Uuid, id: Uuid) -> Result<Option<SourceView>, DbError> {
     let Some(row) = sqlx::query(
-        "SELECT id, status, failure, url, final_url, title, body, truncated, refused_ideas \
+        "SELECT id, status, failure, url, final_url, title, body, truncated, refused_ideas, model \
          FROM sources WHERE id = $1 AND workspace_id = $2",
     )
     .bind(id)
@@ -318,6 +386,8 @@ pub async fn get(pool: &PgPool, workspace: Uuid, id: Uuid) -> Result<Option<Sour
         title: row.try_get("title")?,
         truncated: row.try_get("truncated")?,
         refused_ideas: row.try_get("refused_ideas")?,
+        model: row.try_get("model")?,
+        body,
         ideas,
     }))
 }

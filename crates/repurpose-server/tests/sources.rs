@@ -504,3 +504,38 @@ async fn a_full_queue_refuses_new_sources() {
     );
     kit.db.cleanup().await;
 }
+
+#[tokio::test]
+async fn a_member_is_rate_limited_per_hour() {
+    let kit = Kit::new().await;
+    let alice = kit.user("alice@example.test").await;
+    let a = kit.workspace(&alice).await;
+    let path = format!("/v1/workspaces/{a}/sources");
+    let allowance = repurpose_sources::store::Limits::default().per_user_hour;
+    for n in 0..allowance {
+        let (status, body) = kit
+            .call(
+                Method::POST,
+                &path,
+                Auth::Session(&alice),
+                Some(&format!("k{n}")),
+                url("https://example.com/post"),
+            )
+            .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    }
+    let (status, body) = kit
+        .call(
+            Method::POST,
+            &path,
+            Auth::Session(&alice),
+            Some("over"),
+            url("https://example.com/post"),
+        )
+        .await;
+    assert_eq!(
+        (status, body["error"]["code"].as_str()),
+        (StatusCode::TOO_MANY_REQUESTS, Some("rate_limited"))
+    );
+    kit.db.cleanup().await;
+}

@@ -8,6 +8,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use repurpose_accounts::Accounts;
+use repurpose_accounts::Via;
 use repurpose_accounts::domain::Action;
 use repurpose_accounts::error::AccountsError;
 use repurpose_db::DbError;
@@ -28,7 +29,7 @@ pub struct Sources {
     pub pool: PgPool,
     pub policy: Policy,
     pub caps: Caps,
-    pub max_pending: i64,
+    pub limits: store::Limits,
 }
 
 impl Sources {
@@ -38,7 +39,7 @@ impl Sources {
             pool,
             policy: Policy::default(),
             caps,
-            max_pending: 100, // LIMIT(sources-pending)
+            limits: store::Limits::default(),
         }
     }
 }
@@ -49,6 +50,7 @@ pub enum SourcesError {
     Invalid(&'static str, &'static str),
     QueueFull,
     BudgetExhausted,
+    RateLimited,
     NotFound,
     Unavailable,
     Internal,
@@ -81,6 +83,11 @@ impl IntoResponse for SourcesError {
                 S::TOO_MANY_REQUESTS,
                 "queue_full",
                 "too many sources are waiting; retry when some finish",
+            ),
+            Self::RateLimited => error(
+                S::TOO_MANY_REQUESTS,
+                "rate_limited",
+                "too many sources submitted this hour; retry later",
             ),
             Self::BudgetExhausted => error(
                 S::TOO_MANY_REQUESTS,
@@ -142,12 +149,17 @@ async fn submit(
     if spend::exhausted(&sources.pool, sources.caps, access.workspace).await? {
         return Err(SourcesError::BudgetExhausted);
     }
-    match store::submit(
+    let user = match access.via {
+        Via::Member { user, .. } => Some(user),
+        Via::Token { .. } => None,
+    };
+    match store::submit_as(
         &sources.pool,
         access.workspace,
+        user,
         &key,
         url.as_str(),
-        sources.max_pending,
+        sources.limits,
     )
     .await?
     {
@@ -164,6 +176,7 @@ async fn submit(
             "this Idempotency-Key was used for another URL",
         )),
         Submitted::QueueFull => Err(SourcesError::QueueFull),
+        Submitted::RateLimited => Err(SourcesError::RateLimited),
     }
 }
 

@@ -17,7 +17,9 @@ CREATE TABLE sources (
     body text CHECK (length(body) <= 1048576),
     truncated boolean NOT NULL DEFAULT false,
     refused_ideas integer NOT NULL DEFAULT 0 CHECK (refused_ideas >= 0),
+    submitted_by uuid REFERENCES users (id) ON DELETE SET NULL,
     prompt_version text,
+    model text CHECK (length(model) <= 128),
     attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     lease_until timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -27,6 +29,7 @@ CREATE TABLE sources (
     CHECK (status <> 'ready' OR body IS NOT NULL)
 );
 CREATE INDEX sources_workspace_created ON sources (workspace_id, created_at DESC, id DESC);
+CREATE INDEX sources_submitted_by ON sources (submitted_by, created_at) WHERE submitted_by IS NOT NULL;
 CREATE INDEX sources_claimable ON sources (created_at, id) WHERE status IN ('pending', 'running');
 -- The lease sweep reads only running rows: without this it walks every pending row per claim.
 CREATE INDEX sources_leased ON sources (lease_until) WHERE status = 'running';
@@ -36,7 +39,7 @@ CREATE INDEX sources_leased ON sources (lease_until) WHERE status = 'running';
 CREATE TABLE ideas (
     source_id uuid NOT NULL REFERENCES sources (id) ON DELETE CASCADE,
     ordinal integer NOT NULL CHECK (ordinal BETWEEN 0 AND 63),
-    kind text NOT NULL CHECK (kind IN ('idea', 'quote', 'number')),
+    kind text NOT NULL CHECK (kind IN ('summary', 'audience', 'idea', 'quote', 'number')),
     text text NOT NULL CHECK (length(text) BETWEEN 1 AND 2000),
     spans jsonb NOT NULL CHECK (jsonb_typeof(spans) = 'array'),
     PRIMARY KEY (source_id, ordinal)

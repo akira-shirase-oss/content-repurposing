@@ -325,3 +325,41 @@ async fn retries_never_outlast_the_analysis_deadline() {
     );
     assert_eq!(ledger.events().len() as u64, model.call_count());
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_summary_and_an_audience_are_kept_with_their_quotes() {
+    let reply = serde_json::json!({ "ideas": [
+        { "kind": "Summary", "text": "Bound your queues.", "quotes": ["Bounded queues keep a service honest under load."] },
+        { "kind": "audience", "text": "Service operators", "quotes": ["Unbounded is a bug you have not met yet."] }
+    ] })
+    .to_string();
+    let model = Recorded::steps(vec![repurpose_analysis::model::Step::Reply(
+        repurpose_analysis::model::ModelReply {
+            text: reply,
+            stop: repurpose_analysis::model::Stop::EndTurn,
+            usage: repurpose_analysis::model::Usage::default(),
+        },
+    )]);
+    let analysis = analyse(&model, &spend(), SOURCE, &Settings::default())
+        .await
+        .unwrap();
+    let kinds: Vec<Kind> = analysis.ideas.iter().map(|i| i.kind).collect();
+    assert_eq!(kinds, [Kind::Summary, Kind::Audience]);
+    assert_eq!(analysis.refused, 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_echo_leads_with_a_quoted_summary() {
+    let analysis = analyse(&Recorded::echo(), &spend(), SOURCE, &Settings::default())
+        .await
+        .unwrap();
+    assert_eq!(analysis.ideas[0].kind, Kind::Summary);
+    assert_eq!(
+        analysis
+            .ideas
+            .iter()
+            .filter(|i| i.kind == Kind::Summary)
+            .count(),
+        1
+    );
+}

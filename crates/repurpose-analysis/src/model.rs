@@ -19,7 +19,9 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub struct ModelRequest {
     /// The fixed instructions (prompt version included).
     pub system: String,
-    /// The extracted article, delivered as a document, never as instructions.
+    /// The extracted article, in its own field and never inside `system`. A provider
+    /// adapter must send it as a separate document, not as instruction text: owed with
+    /// the provider client (D-005).
     pub source: String,
     /// Why the previous answer was rejected, on the one repair attempt.
     pub repair: Option<String>,
@@ -209,8 +211,11 @@ fn echo(source: &str) -> ModelReply {
         .map(str::trim)
         .filter(|s| s.len() >= 40 && s.len() <= 400)
         .take(5)
-        .map(|sentence| {
-            let kind = if sentence.chars().any(|c| c.is_ascii_digit()) {
+        .enumerate()
+        .map(|(n, sentence)| {
+            let kind = if n == 0 {
+                "summary"
+            } else if sentence.chars().any(|c| c.is_ascii_digit()) {
                 "number"
             } else {
                 "idea"
